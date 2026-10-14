@@ -7,7 +7,7 @@ const RUN_DURATION := 300.0
 const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
-const VERSION := "Beta0.2.1"
+const VERSION := "Beta0.2.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -66,6 +66,9 @@ var slow_effect_multiplier := 1.0
 var selected_character := "claire"
 var run_started := false
 var skill_cooldown_remaining := 0.0
+var build_open := false
+var total_damage_dealt := 0.0
+var total_damage_taken := 0.0
 
 var game_time := 0.0
 var spawn_timer := 0.0
@@ -132,6 +135,8 @@ var upgrade_buttons: HBoxContainer
 var reroll_button: Button
 var current_upgrade_choices: Array = []
 var rerolls_remaining := 1
+var build_overlay: ColorRect
+var build_text: Label
 var end_overlay: ColorRect
 var end_title: Label
 var end_summary: Label
@@ -150,6 +155,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_handle_build_input()
 	_handle_pause_input()
 	_handle_upgrade_input()
 	if get_tree().paused:
@@ -185,6 +191,7 @@ func _ensure_input_map() -> void:
 		"upgrade_2": [KEY_2],
 		"upgrade_3": [KEY_3],
 		"reroll": [KEY_R],
+		"build": [KEY_TAB],
 	}
 	for action_name in bindings:
 		if not InputMap.has_action(action_name):
@@ -290,7 +297,7 @@ func _build_interface() -> void:
 	instruction_label.offset_bottom = -20.0
 	instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	instruction_label.add_theme_font_size_override("font_size", 20)
-	instruction_label.text = "WASD／方向鍵移動　空白鍵施放戰技　Esc 暫停"
+	instruction_label.text = "WASD／方向鍵移動　空白鍵戰技　Tab 建構　Esc 暫停"
 	hud.add_child(instruction_label)
 
 	pause_label = Label.new()
@@ -324,6 +331,7 @@ func _build_interface() -> void:
 
 	_build_upgrade_overlay()
 	_build_end_overlay()
+	_build_loadout_overlay()
 	_build_character_overlay()
 
 
@@ -436,6 +444,49 @@ func _build_end_overlay() -> void:
 	column.add_child(disclaimer)
 
 
+func _build_loadout_overlay() -> void:
+	build_overlay = ColorRect.new()
+	build_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	build_overlay.color = Color(0.01, 0.02, 0.06, 0.92)
+	build_overlay.theme = ui_theme
+	build_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	build_overlay.visible = false
+	canvas_layer.add_child(build_overlay)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.process_mode = Node.PROCESS_MODE_ALWAYS
+	build_overlay.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(780.0, 560.0)
+	center.add_child(panel)
+
+	var column := VBoxContainer.new()
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_theme_constant_override("separation", 20)
+	panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "當前建構"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 34)
+	column.add_child(title)
+
+	build_text = Label.new()
+	build_text.custom_minimum_size = Vector2(690.0, 390.0)
+	build_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	build_text.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	build_text.add_theme_font_size_override("font_size", 20)
+	column.add_child(build_text)
+
+	var hint := Label.new()
+	hint.text = "按 Tab 或 Esc 返回戰鬥"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 17)
+	column.add_child(hint)
+
+
 func _build_character_overlay() -> void:
 	character_overlay = ColorRect.new()
 	character_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -530,9 +581,11 @@ func _show_character_select() -> void:
 	game_over = false
 	choosing_upgrade = false
 	manual_paused = false
+	build_open = false
 	upgrade_overlay.visible = false
 	end_overlay.visible = false
 	pause_label.visible = false
+	build_overlay.visible = false
 	character_overlay.visible = true
 	_choose_character(selected_character)
 	queue_redraw()
@@ -544,12 +597,15 @@ func _start_game() -> void:
 	game_over = false
 	choosing_upgrade = false
 	manual_paused = false
+	build_open = false
 	pending_levels = 0
 	rerolls_remaining = 1
 	current_upgrade_choices.clear()
 	game_time = 0.0
 	spawn_timer = 0.15
 	kills = 0
+	total_damage_dealt = 0.0
+	total_damage_taken = 0.0
 	instruction_time = 10.0
 
 	player_pos = Vector2.ZERO
@@ -607,6 +663,7 @@ func _start_game() -> void:
 
 	camera.position = player_pos
 	character_overlay.visible = false
+	build_overlay.visible = false
 	upgrade_overlay.visible = false
 	end_overlay.visible = false
 	pause_label.visible = false
@@ -620,11 +677,51 @@ func _start_game() -> void:
 func _handle_pause_input() -> void:
 	if not Input.is_action_just_pressed("pause"):
 		return
+	if build_open:
+		_toggle_build_overlay()
+		return
 	if choosing_upgrade or game_over or not run_started:
 		return
 	manual_paused = not manual_paused
 	get_tree().paused = manual_paused
 	pause_label.visible = manual_paused
+
+
+func _handle_build_input() -> void:
+	if Input.is_action_just_pressed("build"):
+		_toggle_build_overlay()
+
+
+func _toggle_build_overlay() -> void:
+	if build_open:
+		build_open = false
+		build_overlay.visible = false
+		get_tree().paused = false
+		return
+	if not run_started or choosing_upgrade or game_over or manual_paused:
+		return
+	build_open = true
+	_update_build_text()
+	build_overlay.visible = true
+	get_tree().paused = true
+
+
+func _update_build_text() -> void:
+	var character_data: Dictionary = CHARACTERS[selected_character]
+	build_text.text = "%s｜%s\n%s\n\n武器\n• 星源鐮環　Lv.%d / 5\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5\n\n重抽剩餘　%d" % [
+		character_data["name"],
+		character_data["role"],
+		character_data["passive"],
+		scythe_level,
+		("未取得" if needle_level == 0 else "Lv.%d / 5" % needle_level),
+		("未取得" if storm_level == 0 else "Lv.%d / 5" % storm_level),
+		int(meta_levels["health"]),
+		int(meta_levels["speed"]),
+		int(meta_levels["pickup"]),
+		int(meta_levels["armor"]),
+		int(meta_levels["damage"]),
+		rerolls_remaining,
+	]
 
 
 func _handle_upgrade_input() -> void:
@@ -913,7 +1010,9 @@ func _update_enemy_statuses(delta: float) -> void:
 			enemy["burn_tick"] = float(enemy.get("burn_tick", 0.0)) - delta
 			if float(enemy["burn_tick"]) <= 0.0:
 				enemy["burn_tick"] = 0.5
-				enemy["hp"] = float(enemy["hp"]) - float(enemy.get("burn_damage", 0.0))
+				var burn_damage: float = float(enemy.get("burn_damage", 0.0))
+				total_damage_dealt += minf(burn_damage, float(enemy["hp"]))
+				enemy["hp"] = float(enemy["hp"]) - burn_damage
 				enemy["flash"] = 0.08
 				if enemy["boss"]:
 					apostle_hp = maxf(0.0, float(enemy["hp"]))
@@ -996,6 +1095,7 @@ func _damage_enemy(index: int, amount: float) -> void:
 	if index < 0 or index >= enemies.size():
 		return
 	var enemy = enemies[index]
+	total_damage_dealt += minf(amount, float(enemy["hp"]))
 	enemy["hp"] = float(enemy["hp"]) - amount
 	enemy["flash"] = 0.08
 	if enemy["boss"]:
@@ -1027,6 +1127,7 @@ func _take_player_damage(amount: float) -> void:
 	if player_invulnerable > 0.0 or game_over:
 		return
 	var final_amount := maxf(1.0, amount - player_armor)
+	total_damage_taken += final_amount
 	if player_shield > 0.0:
 		var absorbed := minf(player_shield, final_amount)
 		player_shield -= absorbed
@@ -1280,10 +1381,12 @@ func _finish_game(victory: bool) -> void:
 	end_overlay.visible = true
 	end_title.text = "使徒討伐完成" if victory else "任務失敗"
 	end_title.modulate = Color(0.45, 0.95, 1.0) if victory else Color(1.0, 0.4, 0.48)
-	end_summary.text = "生存時間　%s\n擊殺數　%d\n最終等級　%d\n\n%s" % [
+	end_summary.text = "生存時間　%s\n擊殺數　%d　最終等級　%d\n造成傷害　%d　承受傷害　%d\n\n%s" % [
 		_format_countdown(game_time),
 		kills,
 		level,
+		int(total_damage_dealt),
+		int(total_damage_taken),
 		("方舟防線暫時安全。" if victory else "重新調整強化後再次出擊。"),
 	]
 

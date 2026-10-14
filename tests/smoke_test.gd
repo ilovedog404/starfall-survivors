@@ -53,6 +53,14 @@ func _run() -> void:
 	if game.player_armor != 3.0 or game.close_damage_multiplier <= 1.0:
 		_fail("埃帕蒂的初始被動沒有套用")
 		return
+	game._toggle_build_overlay()
+	if not game.build_open or not game.build_overlay.visible or not "星源鐮環" in game.build_text.text:
+		_fail("當前建構面板沒有正確開啟")
+		return
+	game._toggle_build_overlay()
+	if game.build_open or game.build_overlay.visible:
+		_fail("當前建構面板沒有正確關閉")
+		return
 	game._spawn_mutant("chaser")
 	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
 	game.enemies[0]["hp"] = 200.0
@@ -80,6 +88,14 @@ func _run() -> void:
 	game._fire_scythe_ring()
 	if not game.enemies.is_empty() and float(game.enemies[0]["hp"]) >= starting_hp:
 		_fail("星源鐮環沒有造成傷害")
+		return
+	if game.total_damage_dealt <= 0.0:
+		_fail("造成傷害統計沒有累計")
+		return
+	game.player_invulnerable = 0.0
+	game._take_player_damage(10.0)
+	if game.total_damage_taken <= 0.0:
+		_fail("承受傷害統計沒有累計")
 		return
 
 	game._gain_experience(100.0)
@@ -121,7 +137,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-select/skills/status/movement/combat/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: character-select/build/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
