@@ -49,6 +49,9 @@ func _run() -> void:
 		game._update_gems(delta)
 		game._update_effects(delta)
 
+	if game.wave_index != 3:
+		_fail("完整局模擬沒有觸發三個異變體波次")
+		return
 	if not game.apostle_spawned or not game.apostle_present:
 		_fail("完整局模擬沒有生成使徒")
 		return

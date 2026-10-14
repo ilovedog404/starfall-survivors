@@ -7,7 +7,8 @@ const RUN_DURATION := 300.0
 const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
-const VERSION := "Beta0.2.2"
+const WAVE_TIMES := [60.0, 120.0, 180.0]
+const VERSION := "Beta0.3.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -78,6 +79,7 @@ var choosing_upgrade := false
 var manual_paused := false
 var pending_levels := 0
 var instruction_time := 10.0
+var wave_index := 0
 
 var level := 1
 var experience := 0.0
@@ -607,6 +609,7 @@ func _start_game() -> void:
 	total_damage_dealt = 0.0
 	total_damage_taken = 0.0
 	instruction_time = 10.0
+	wave_index = 0
 
 	player_pos = Vector2.ZERO
 	player_speed = 255.0
@@ -810,6 +813,9 @@ func _use_rafari_skill() -> void:
 
 func _update_spawning(delta: float) -> void:
 	game_time += delta
+	while wave_index < WAVE_TIMES.size() and game_time >= float(WAVE_TIMES[wave_index]):
+		_trigger_wave(wave_index)
+		wave_index += 1
 	spawn_timer -= delta
 	var interval := maxf(0.16, 0.72 - game_time * 0.0016)
 	if spawn_timer <= 0.0 and enemies.size() < MAX_ENEMIES:
@@ -822,17 +828,56 @@ func _update_spawning(delta: float) -> void:
 		_spawn_apostle()
 
 
+func _trigger_wave(index: int) -> void:
+	var composition: Array
+	match index:
+		0: composition = ["dasher", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher"]
+		1: composition = ["shooter", "shooter", "shooter", "shooter", "shooter", "shooter", "chaser", "chaser", "chaser", "chaser"]
+		_: composition = ["tank", "tank", "tank", "tank", "tank", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher"]
+	for kind in composition:
+		if enemies.size() >= MAX_ENEMIES:
+			break
+		_spawn_mutant(kind)
+	instruction_label.text = "異變體波次 %d／%d 接近" % [index + 1, WAVE_TIMES.size()]
+	instruction_label.visible = true
+	instruction_time = 4.0
+	effects.append({"kind": "warning", "pos": player_pos, "life": 1.1, "total": 1.1, "radius": 300.0})
+
+
 func _spawn_mutant(force_kind: String = "") -> void:
 	var angle := rng.randf_range(0.0, TAU)
 	var distance := rng.randf_range(650.0, 830.0)
 	var kind := force_kind
 	if kind.is_empty():
-		kind = "dasher" if game_time > 35.0 and rng.randf() < 0.24 else "chaser"
+		var roll := rng.randf()
+		if game_time > 150.0 and roll < 0.1:
+			kind = "tank"
+		elif game_time > 90.0 and roll < 0.28:
+			kind = "shooter"
+		elif game_time > 35.0 and roll < 0.52:
+			kind = "dasher"
+		else:
+			kind = "chaser"
 	var difficulty := 1.0 + game_time / 360.0
 	var elite := game_time > 50.0 and rng.randf() < 0.025
-	var hp := (31.0 if kind == "chaser" else 24.0) * difficulty
-	var speed := (76.0 if kind == "chaser" else 66.0) * (1.0 + game_time / 900.0)
-	var radius := 15.0 if kind == "chaser" else 13.0
+	var base_hp := 31.0
+	var base_speed := 76.0
+	var radius := 15.0
+	match kind:
+		"dasher":
+			base_hp = 24.0
+			base_speed = 66.0
+			radius = 13.0
+		"shooter":
+			base_hp = 30.0
+			base_speed = 58.0
+			radius = 14.0
+		"tank":
+			base_hp = 98.0
+			base_speed = 42.0
+			radius = 24.0
+	var hp := base_hp * difficulty
+	var speed := base_speed * (1.0 + game_time / 900.0)
 	if elite:
 		hp *= 4.2
 		speed *= 1.12
@@ -850,6 +895,7 @@ func _spawn_mutant(force_kind: String = "") -> void:
 		"dash_time": 0.0,
 		"dash_dir": Vector2.ZERO,
 		"contact_cooldown": 0.0,
+		"attack_cooldown": rng.randf_range(0.5, 2.2),
 		"flash": 0.0,
 		"burn_time": 0.0,
 		"burn_tick": 0.0,
@@ -1044,6 +1090,18 @@ func _update_enemies(delta: float) -> void:
 				for summon_index in 5:
 					_spawn_mutant("chaser" if summon_index % 2 == 0 else "dasher")
 				enemy["summon_cooldown"] = 7.0
+		elif enemy["kind"] == "shooter":
+			var distance_to_player: float = enemy["pos"].distance_to(player_pos)
+			if distance_to_player > 370.0:
+				enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
+			elif distance_to_player < 245.0:
+				enemy["pos"] -= direction * float(enemy["speed"]) * status_speed * delta
+			else:
+				enemy["pos"] += direction.rotated(PI * 0.5) * float(enemy["speed"]) * 0.45 * status_speed * delta
+			enemy["attack_cooldown"] = float(enemy["attack_cooldown"]) - delta
+			if float(enemy["attack_cooldown"]) <= 0.0 and status_speed > 0.0:
+				_fire_mutant_shot(enemy["pos"])
+				enemy["attack_cooldown"] = rng.randf_range(2.1, 2.8)
 		elif enemy["kind"] == "dasher":
 			if float(enemy["dash_time"]) > 0.0:
 				enemy["dash_time"] = float(enemy["dash_time"]) - delta
@@ -1059,7 +1117,8 @@ func _update_enemies(delta: float) -> void:
 			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 
 		if enemy["pos"].distance_to(player_pos) <= float(enemy["radius"]) + 18.0 and float(enemy["contact_cooldown"]) <= 0.0:
-			_take_player_damage(22.0 if enemy["boss"] else (11.0 if enemy["elite"] else 7.0))
+			var contact_damage := 22.0 if enemy["boss"] else (14.0 if enemy["kind"] == "tank" else (11.0 if enemy["elite"] else 7.0))
+			_take_player_damage(contact_damage)
 			enemy["contact_cooldown"] = 0.75
 		enemies[index] = enemy
 
@@ -1075,6 +1134,17 @@ func _fire_apostle_burst(origin: Vector2) -> void:
 			"damage": 10.0,
 			"life": 6.0,
 		})
+
+
+func _fire_mutant_shot(origin: Vector2) -> void:
+	var direction := origin.direction_to(player_pos)
+	hostile_projectiles.append({
+		"pos": origin,
+		"velocity": direction * 255.0,
+		"radius": 7.0,
+		"damage": 8.0,
+		"life": 5.0,
+	})
 
 
 func _update_hostile_projectiles(delta: float) -> void:
@@ -1333,8 +1403,10 @@ func _update_interface(delta: float) -> void:
 		int(player_armor),
 		kills,
 	]
-	enemy_label.text = "異變體 %d\n使徒降臨 %s" % [
+	enemy_label.text = "異變體 %d　波次 %d / %d\n使徒降臨 %s" % [
 		enemies.size(),
+		wave_index,
+		WAVE_TIMES.size(),
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
 	weapon_label.text = "星源鐮環 Lv.%d%s\n星針 %s｜脈衝雷暴 %s" % [
@@ -1461,23 +1533,43 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		for spoke in 6:
 			var angle := TAU * float(spoke) / 6.0 + game_time * 0.25
 			draw_line(position + Vector2.from_angle(angle) * (radius * 0.7), position + Vector2.from_angle(angle) * (radius * 1.22), boss_color, 4.0)
+		if float(enemy.get("burn_time", 0.0)) > 0.0:
+			draw_arc(position, radius + 12.0, -1.2, 2.2, 24, Color(1.0, 0.38, 0.08, 0.9), 5.0, true)
+		if float(enemy.get("slow_time", 0.0)) > 0.0:
+			draw_arc(position, radius + 15.0, 0.0, TAU, 36, Color(0.42, 0.82, 1.0, 0.9), 5.0, true)
 		return
 
-	var base_color := Color(0.82, 0.2, 0.38) if enemy["kind"] == "chaser" else Color(1.0, 0.52, 0.2)
+	var base_color := Color(0.82, 0.2, 0.38)
+	match enemy["kind"]:
+		"dasher": base_color = Color(1.0, 0.52, 0.2)
+		"shooter": base_color = Color(0.72, 0.34, 1.0)
+		"tank": base_color = Color(0.9, 0.26, 0.22)
 	if flash:
 		base_color = Color.WHITE
-	if enemy["kind"] == "dasher":
-		var points := PackedVector2Array([
-			position + Vector2(0.0, -radius),
-			position + Vector2(radius, 0.0),
-			position + Vector2(0.0, radius),
-			position + Vector2(-radius, 0.0),
-		])
-		draw_colored_polygon(points, base_color)
-	else:
-		draw_circle(position, radius, base_color)
-		draw_circle(position + Vector2(-5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
-		draw_circle(position + Vector2(5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
+	match enemy["kind"]:
+		"dasher":
+			var dasher_points := PackedVector2Array([
+				position + Vector2(0.0, -radius),
+				position + Vector2(radius, 0.0),
+				position + Vector2(0.0, radius),
+				position + Vector2(-radius, 0.0),
+			])
+			draw_colored_polygon(dasher_points, base_color)
+		"shooter":
+			var shooter_points := PackedVector2Array([
+				position + Vector2(0.0, -radius),
+				position + Vector2(radius, radius * 0.82),
+				position + Vector2(-radius, radius * 0.82),
+			])
+			draw_colored_polygon(shooter_points, base_color)
+			draw_circle(position, 4.0, Color(0.08, 0.02, 0.12))
+		"tank":
+			draw_rect(Rect2(position - Vector2(radius * 0.82, radius * 0.72), Vector2(radius * 1.64, radius * 1.44)), base_color)
+			draw_arc(position, radius, 0.0, TAU, 24, Color(1.0, 0.58, 0.4), 4.0, true)
+		_:
+			draw_circle(position, radius, base_color)
+			draw_circle(position + Vector2(-5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
+			draw_circle(position + Vector2(5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
 	if enemy["elite"]:
 		draw_arc(position, radius + 5.0, 0.0, TAU, 24, Color(1.0, 0.86, 0.22), 3.0)
 		var hp_ratio: float = float(enemy["hp"]) / float(enemy["max_hp"])

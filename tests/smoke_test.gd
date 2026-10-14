@@ -61,6 +61,27 @@ func _run() -> void:
 	if game.build_open or game.build_overlay.visible:
 		_fail("當前建構面板沒有正確關閉")
 		return
+	game._spawn_mutant("shooter")
+	game.enemies[0]["pos"] = game.player_pos + Vector2(300.0, 0.0)
+	game.enemies[0]["attack_cooldown"] = 0.0
+	game._update_enemies(0.1)
+	if game.hostile_projectiles.is_empty():
+		_fail("遠程型異變體沒有發射彈體")
+		return
+	game.enemies.clear()
+	game.hostile_projectiles.clear()
+	game._spawn_mutant("tank")
+	if float(game.enemies[0]["hp"]) < 90.0 or float(game.enemies[0]["radius"]) < 20.0:
+		_fail("重裝型異變體數值不正確")
+		return
+	game.enemies.clear()
+	game.game_time = 60.0
+	game.wave_index = 0
+	game._update_spawning(0.0)
+	if game.wave_index != 1 or game.enemies.size() < 8:
+		_fail("第一波異變體沒有正確生成")
+		return
+	game._start_game()
 	game._spawn_mutant("chaser")
 	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
 	game.enemies[0]["hp"] = 200.0
@@ -137,7 +158,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-select/build/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: character-select/build/enemy-types/waves/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
