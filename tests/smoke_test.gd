@@ -86,11 +86,24 @@ func _run() -> void:
 	if not game.choosing_upgrade or not game.upgrade_overlay.visible:
 		_fail("升級三選一沒有開啟")
 		return
+	var rerolls_before: int = game.rerolls_remaining
+	game._reroll_upgrades()
+	if game.rerolls_remaining != rerolls_before - 1 or game.current_upgrade_choices.size() != 3:
+		_fail("升級重抽沒有正確更新選項")
+		return
 	game._select_upgrade("needle")
 	while game.pending_levels > 0:
 		game._select_upgrade("health")
 	if game.needle_level < 1:
 		_fail("星針升級沒有套用")
+		return
+	game.storm_level = 1
+	game._spawn_mutant("chaser")
+	game.enemies[-1]["pos"] = game.player_pos + Vector2(80.0, 0.0)
+	var storm_target_hp: float = game.enemies[-1]["hp"]
+	game._fire_pulse_storm()
+	if not game.enemies.is_empty() and float(game.enemies[-1]["hp"]) >= storm_target_hp:
+		_fail("脈衝雷暴沒有造成傷害")
 		return
 
 	get_tree().paused = false
@@ -108,7 +121,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-select/skills/status/movement/combat/xp/upgrade/apostle/result")
+	print("SMOKE_TEST_PASS: character-select/skills/status/movement/combat/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

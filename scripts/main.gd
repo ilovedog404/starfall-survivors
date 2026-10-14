@@ -7,7 +7,7 @@ const RUN_DURATION := 300.0
 const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
-const VERSION := "Beta0.1.3"
+const VERSION := "Beta0.2.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -98,6 +98,12 @@ var needle_damage := 17.0
 var needle_interval := 0.72
 var needle_timer := 0.2
 
+var storm_level := 0
+var storm_damage := 36.0
+var storm_radius := 56.0
+var storm_interval := 2.2
+var storm_timer := 0.7
+
 var enemies: Array = []
 var projectiles: Array = []
 var hostile_projectiles: Array = []
@@ -123,6 +129,9 @@ var boss_label: Label
 var upgrade_overlay: ColorRect
 var upgrade_title: Label
 var upgrade_buttons: HBoxContainer
+var reroll_button: Button
+var current_upgrade_choices: Array = []
+var rerolls_remaining := 1
 var end_overlay: ColorRect
 var end_title: Label
 var end_summary: Label
@@ -142,6 +151,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_handle_pause_input()
+	_handle_upgrade_input()
 	if get_tree().paused:
 		queue_redraw()
 		return
@@ -171,6 +181,10 @@ func _ensure_input_map() -> void:
 		"move_down": [KEY_S, KEY_DOWN],
 		"pause": [KEY_ESCAPE],
 		"skill": [KEY_SPACE],
+		"upgrade_1": [KEY_1],
+		"upgrade_2": [KEY_2],
+		"upgrade_3": [KEY_3],
+		"reroll": [KEY_R],
 	}
 	for action_name in bindings:
 		if not InputMap.has_action(action_name):
@@ -349,8 +363,16 @@ func _build_upgrade_overlay() -> void:
 	upgrade_buttons.process_mode = Node.PROCESS_MODE_ALWAYS
 	column.add_child(upgrade_buttons)
 
+	reroll_button = Button.new()
+	reroll_button.custom_minimum_size = Vector2(260.0, 46.0)
+	reroll_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	reroll_button.add_theme_font_size_override("font_size", 17)
+	reroll_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	reroll_button.pressed.connect(_reroll_upgrades)
+	column.add_child(reroll_button)
+
 	var hint := Label.new()
-	hint.text = "點擊卡片選擇；戰鬥會在選擇後繼續"
+	hint.text = "點擊卡片或按 1／2／3 選擇；R 可重抽"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_size_override("font_size", 16)
 	column.add_child(hint)
@@ -523,6 +545,8 @@ func _start_game() -> void:
 	choosing_upgrade = false
 	manual_paused = false
 	pending_levels = 0
+	rerolls_remaining = 1
+	current_upgrade_choices.clear()
 	game_time = 0.0
 	spawn_timer = 0.15
 	kills = 0
@@ -565,6 +589,11 @@ func _start_game() -> void:
 	needle_damage = 17.0
 	needle_interval = 0.72
 	needle_timer = 0.2
+	storm_level = 0
+	storm_damage = 36.0
+	storm_radius = 56.0
+	storm_interval = 2.2
+	storm_timer = 0.7
 
 	enemies.clear()
 	projectiles.clear()
@@ -596,6 +625,17 @@ func _handle_pause_input() -> void:
 	manual_paused = not manual_paused
 	get_tree().paused = manual_paused
 	pause_label.visible = manual_paused
+
+
+func _handle_upgrade_input() -> void:
+	if not choosing_upgrade:
+		return
+	for index in mini(3, current_upgrade_choices.size()):
+		if Input.is_action_just_pressed("upgrade_%d" % (index + 1)):
+			_select_upgrade(current_upgrade_choices[index]["id"])
+			return
+	if Input.is_action_just_pressed("reroll"):
+		_reroll_upgrades()
 
 
 func _update_player(delta: float) -> void:
@@ -769,6 +809,12 @@ func _update_weapons(delta: float) -> void:
 			_fire_star_needles()
 			needle_timer += needle_interval
 
+	if storm_level > 0:
+		storm_timer -= delta
+		if storm_timer <= 0.0:
+			_fire_pulse_storm()
+			storm_timer += storm_interval
+
 
 func _fire_scythe_ring() -> void:
 	var dealt_damage := scythe_damage * damage_multiplier * close_damage_multiplier
@@ -805,6 +851,26 @@ func _fire_star_needles() -> void:
 			"radius": 6.0,
 			"life": 1.5,
 		})
+
+
+func _fire_pulse_storm() -> void:
+	if enemies.is_empty():
+		return
+	var strike_count := 1 + int((storm_level - 1) / 2.0)
+	var targets := _nearest_enemy_indices(strike_count)
+	var strike_positions: Array = []
+	for enemy_index in targets:
+		if enemy_index >= 0 and enemy_index < enemies.size():
+			strike_positions.append(enemies[enemy_index]["pos"])
+	for position in strike_positions:
+		effects.append({"kind": "storm", "pos": position, "life": 0.42, "total": 0.42, "radius": storm_radius})
+	for enemy_index in range(enemies.size() - 1, -1, -1):
+		var hit_count := 0
+		for position in strike_positions:
+			if enemies[enemy_index]["pos"].distance_to(position) <= storm_radius + float(enemies[enemy_index]["radius"]):
+				hit_count += 1
+		if hit_count > 0:
+			_damage_enemy(enemy_index, storm_damage * damage_multiplier * hit_count)
 
 
 func _nearest_enemy_indices(count: int) -> Array:
@@ -1011,16 +1077,27 @@ func _show_upgrade_choices() -> void:
 	var candidates := _available_upgrades()
 	candidates.shuffle()
 	var option_count := mini(3, candidates.size())
+	current_upgrade_choices.clear()
 	for index in option_count:
 		var option = candidates[index]
+		current_upgrade_choices.append(option)
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(285.0, 205.0)
-		button.text = "%s\n\n%s" % [option["name"], option["description"]]
+		button.text = "[%d] %s\n\n%s" % [index + 1, option["name"], option["description"]]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_theme_font_size_override("font_size", 19)
 		button.process_mode = Node.PROCESS_MODE_ALWAYS
 		button.pressed.connect(_select_upgrade.bind(option["id"]))
 		upgrade_buttons.add_child(button)
+	reroll_button.text = "[R] 重新抽取（剩餘 %d 次）" % rerolls_remaining
+	reroll_button.disabled = rerolls_remaining <= 0
+
+
+func _reroll_upgrades() -> void:
+	if not choosing_upgrade or rerolls_remaining <= 0:
+		return
+	rerolls_remaining -= 1
+	_show_upgrade_choices()
 
 
 func _available_upgrades() -> Array:
@@ -1036,6 +1113,12 @@ func _available_upgrades() -> Array:
 			"id": "needle",
 			"name": "星針 Lv.%d" % (needle_level + 1),
 			"description": _needle_upgrade_description(needle_level + 1),
+		})
+	if storm_level < 5:
+		result.append({
+			"id": "storm",
+			"name": "脈衝雷暴 Lv.%d" % (storm_level + 1),
+			"description": _storm_upgrade_description(storm_level + 1),
 		})
 	if int(meta_levels["health"]) < 5:
 		result.append({"id": "health", "name": "強化生命 Lv.%d" % (int(meta_levels["health"]) + 1), "description": "最大生命 +15，並回復 15 生命"})
@@ -1069,6 +1152,16 @@ func _needle_upgrade_description(next_level: int) -> String:
 	return "強化星針"
 
 
+func _storm_upgrade_description(next_level: int) -> String:
+	match next_level:
+		1: return "取得武器：定期轟擊最近的異變體"
+		2: return "雷暴傷害 +16"
+		3: return "額外轟擊 1 個目標"
+		4: return "攻擊間隔縮短 25%"
+		5: return "再增加 1 個目標，作用半徑 +24"
+	return "強化脈衝雷暴"
+
+
 func _select_upgrade(upgrade_id: String) -> void:
 	match upgrade_id:
 		"scythe":
@@ -1086,6 +1179,12 @@ func _select_upgrade(upgrade_id: String) -> void:
 				2: needle_damage += 8.0
 				4: needle_interval *= 0.8
 				5: needle_damage += 8.0
+		"storm":
+			storm_level += 1
+			match storm_level:
+				2: storm_damage += 16.0
+				4: storm_interval *= 0.75
+				5: storm_radius += 24.0
 		"health":
 			meta_levels["health"] = int(meta_levels["health"]) + 1
 			player_max_health += 15.0
@@ -1137,10 +1236,11 @@ func _update_interface(delta: float) -> void:
 		enemies.size(),
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
-	weapon_label.text = "星源鐮環 Lv.%d%s\n星針 %s" % [
+	weapon_label.text = "星源鐮環 Lv.%d%s\n星針 %s｜脈衝雷暴 %s" % [
 		scythe_level,
 		("｜超載" if scythe_level >= 5 else ""),
 		("未取得" if needle_level == 0 else "Lv.%d" % needle_level),
+		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
 	]
 	var skill_name: String = CHARACTERS[selected_character]["skill_name"]
 	skill_label.text = "空白鍵｜%s\n%s" % [
@@ -1310,6 +1410,10 @@ func _draw_effect(effect: Dictionary) -> void:
 		"ice":
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(0.3, 0.65, 1.0, alpha * 0.14))
 			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 64, Color(0.55, 0.85, 1.0, alpha), 8.0, true)
+		"storm":
+			var strike_top: Vector2 = effect["pos"] + Vector2(0.0, -220.0)
+			draw_line(strike_top, effect["pos"], Color(0.72, 0.92, 1.0, alpha), 9.0, true)
+			draw_arc(effect["pos"], float(effect["radius"]) * (0.55 + progress * 0.45), 0.0, TAU, 36, Color(0.35, 0.78, 1.0, alpha), 7.0, true)
 
 
 func _draw_player() -> void:
