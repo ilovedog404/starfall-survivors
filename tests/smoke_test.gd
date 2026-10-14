@@ -22,11 +22,45 @@ func _run() -> void:
 		if game.selected_character != character_id:
 			_fail("無法選擇角色：" + character_id)
 			return
+	game._choose_character("lucia")
+	game._start_game()
+	game._spawn_mutant("chaser")
+	game.enemies[0]["hp"] = float(game.enemies[0]["max_hp"]) - 1.0
+	if not game._use_character_skill() or float(game.enemies[0]["burn_time"]) <= 4.0:
+		_fail("璐茜婭的全畫面引燃沒有套用")
+		return
+
+	game._show_character_select()
+	game._choose_character("rafari")
+	game._start_game()
+	game._spawn_mutant("chaser")
+	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
+	if not game._use_character_skill() or float(game.enemies[0]["slow_factor"]) != 0.0:
+		_fail("菈法瑞的凍結沒有套用")
+		return
+
+	game._show_character_select()
+	game._choose_character("claire")
+	game._start_game()
+	game.player_shield = 0.0
+	if not game._use_character_skill() or game.player_shield <= 0.0:
+		_fail("克萊兒的鐮環過載沒有回復護盾")
+		return
+
+	game._show_character_select()
 	game._choose_character("epathy")
 	game._start_game()
 	if game.player_armor != 3.0 or game.close_damage_multiplier <= 1.0:
 		_fail("埃帕蒂的初始被動沒有套用")
 		return
+	game._spawn_mutant("chaser")
+	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
+	game.enemies[0]["hp"] = 200.0
+	game.enemies[0]["max_hp"] = 200.0
+	if not game._use_character_skill() or float(game.enemies[0]["hp"]) >= 200.0:
+		_fail("埃帕蒂的環刃震退沒有造成傷害")
+		return
+	game._start_game()
 
 	if game.level != 1 or game.scythe_level != 1:
 		_fail("初始角色狀態不正確")
@@ -74,7 +108,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-select/movement/combat/xp/upgrade/apostle/result")
+	print("SMOKE_TEST_PASS: character-select/skills/status/movement/combat/xp/upgrade/apostle/result")
 	get_tree().quit(0)
 
 

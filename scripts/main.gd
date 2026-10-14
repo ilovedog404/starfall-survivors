@@ -7,20 +7,24 @@ const RUN_DURATION := 300.0
 const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
-const VERSION := "Beta0.1.2"
+const VERSION := "Beta0.1.3"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
 		"role": "近戰／生存",
 		"passive": "護甲 +3；近距離傷害提高 20%",
-		"skill": "戰技預覽：用刀攻擊並擊退周圍敵人",
+		"skill": "主動戰技：用刀攻擊並擊退周圍敵人",
+		"skill_name": "環刃震退",
+		"skill_cooldown": 9.0,
 		"color": Color(1.0, 0.48, 0.55),
 	},
 	"lucia": {
 		"name": "璐茜婭",
 		"role": "法術／持續傷害",
 		"passive": "燃燒持續時間 +30%",
-		"skill": "戰技預覽：點燃全畫面已受傷敵人",
+		"skill": "主動戰技：點燃全畫面已受傷敵人",
+		"skill_name": "灼星引燃",
+		"skill_cooldown": 13.0,
 		"color": Color(0.92, 0.45, 1.0),
 	},
 	"claire": {
@@ -28,13 +32,17 @@ const CHARACTERS := {
 		"role": "新手／均衡",
 		"passive": "初始武器：星源鐮環",
 		"skill": "範圍傷害與護盾兼備，適合第一次遊玩",
+		"skill_name": "鐮環過載",
+		"skill_cooldown": 11.0,
 		"color": Color(0.6, 0.92, 1.0),
 	},
 	"rafari": {
 		"name": "菈法瑞・零度・諾恩",
 		"role": "控場／冰霜",
 		"passive": "減速效果提高",
-		"skill": "戰技預覽：凍結普通敵人，首領大幅減速",
+		"skill": "主動戰技：凍結普通敵人，首領大幅減速",
+		"skill_name": "零度封鎖",
+		"skill_cooldown": 14.0,
 		"color": Color(0.55, 0.72, 1.0),
 	},
 }
@@ -57,6 +65,7 @@ var burn_duration_multiplier := 1.0
 var slow_effect_multiplier := 1.0
 var selected_character := "claire"
 var run_started := false
+var skill_cooldown_remaining := 0.0
 
 var game_time := 0.0
 var spawn_timer := 0.0
@@ -106,6 +115,7 @@ var stats_label: Label
 var enemy_label: Label
 var weapon_label: Label
 var instruction_label: Label
+var skill_label: Label
 var pause_label: Label
 var xp_bar: ProgressBar
 var boss_bar: ProgressBar
@@ -138,10 +148,13 @@ func _process(delta: float) -> void:
 	if game_over or not run_started:
 		return
 
+	skill_cooldown_remaining = maxf(0.0, skill_cooldown_remaining - delta)
+	_handle_skill_input()
 	_update_player(delta)
 	_update_spawning(delta)
 	_update_weapons(delta)
 	_update_projectiles(delta)
+	_update_enemy_statuses(delta)
 	_update_enemies(delta)
 	_update_hostile_projectiles(delta)
 	_update_gems(delta)
@@ -157,6 +170,7 @@ func _ensure_input_map() -> void:
 		"move_up": [KEY_W, KEY_UP],
 		"move_down": [KEY_S, KEY_DOWN],
 		"pause": [KEY_ESCAPE],
+		"skill": [KEY_SPACE],
 	}
 	for action_name in bindings:
 		if not InputMap.has_action(action_name):
@@ -238,6 +252,19 @@ func _build_interface() -> void:
 	weapon_label.add_theme_font_size_override("font_size", 17)
 	hud.add_child(weapon_label)
 
+	skill_label = Label.new()
+	skill_label.anchor_left = 1.0
+	skill_label.anchor_right = 1.0
+	skill_label.anchor_top = 1.0
+	skill_label.anchor_bottom = 1.0
+	skill_label.offset_left = -480.0
+	skill_label.offset_top = -92.0
+	skill_label.offset_right = -20.0
+	skill_label.offset_bottom = -18.0
+	skill_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	skill_label.add_theme_font_size_override("font_size", 17)
+	hud.add_child(skill_label)
+
 	instruction_label = Label.new()
 	instruction_label.anchor_left = 0.5
 	instruction_label.anchor_right = 0.5
@@ -249,7 +276,7 @@ func _build_interface() -> void:
 	instruction_label.offset_bottom = -20.0
 	instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	instruction_label.add_theme_font_size_override("font_size", 20)
-	instruction_label.text = "WASD／方向鍵移動　武器會自動攻擊　Esc 暫停"
+	instruction_label.text = "WASD／方向鍵移動　空白鍵施放戰技　Esc 暫停"
 	hud.add_child(instruction_label)
 
 	pause_label = Label.new()
@@ -514,6 +541,7 @@ func _start_game() -> void:
 	close_damage_multiplier = 1.0
 	burn_duration_multiplier = 1.0
 	slow_effect_multiplier = 1.0
+	skill_cooldown_remaining = 0.0
 	match selected_character:
 		"epathy":
 			player_armor = 3.0
@@ -577,6 +605,72 @@ func _update_player(delta: float) -> void:
 	player_invulnerable = maxf(0.0, player_invulnerable - delta)
 
 
+func _handle_skill_input() -> void:
+	if Input.is_action_just_pressed("skill"):
+		_use_character_skill()
+
+
+func _use_character_skill() -> bool:
+	if not run_started or game_over or choosing_upgrade or skill_cooldown_remaining > 0.0:
+		return false
+	match selected_character:
+		"epathy": _use_epathy_skill()
+		"lucia": _use_lucia_skill()
+		"claire": _use_claire_skill()
+		"rafari": _use_rafari_skill()
+	skill_cooldown_remaining = float(CHARACTERS[selected_character]["skill_cooldown"])
+	return true
+
+
+func _use_epathy_skill() -> void:
+	var radius := 205.0
+	for index in range(enemies.size() - 1, -1, -1):
+		var enemy = enemies[index]
+		if player_pos.distance_to(enemy["pos"]) > radius + float(enemy["radius"]):
+			continue
+		var push_direction: Vector2 = player_pos.direction_to(enemy["pos"])
+		enemy["pos"] += push_direction * (55.0 if enemy["boss"] else 135.0)
+		enemies[index] = enemy
+		_damage_enemy(index, 72.0 * damage_multiplier * close_damage_multiplier)
+	effects.append({"kind": "slash", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius})
+
+
+func _use_lucia_skill() -> void:
+	var ignited := 0
+	for index in enemies.size():
+		var enemy = enemies[index]
+		if float(enemy["hp"]) >= float(enemy["max_hp"]):
+			continue
+		enemy["burn_time"] = 4.0 * burn_duration_multiplier
+		enemy["burn_tick"] = 0.0
+		enemy["burn_damage"] = 11.0 * damage_multiplier
+		enemies[index] = enemy
+		ignited += 1
+	effects.append({"kind": "fire", "pos": player_pos, "life": 0.8, "total": 0.8, "radius": 420.0 + ignited * 3.0})
+
+
+func _use_claire_skill() -> void:
+	var radius := 255.0
+	for index in range(enemies.size() - 1, -1, -1):
+		var enemy = enemies[index]
+		if player_pos.distance_to(enemy["pos"]) <= radius + float(enemy["radius"]):
+			_damage_enemy(index, 55.0 * damage_multiplier)
+	player_shield = minf(player_max_shield, player_shield + 12.0)
+	effects.append({"kind": "pulse", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": radius})
+
+
+func _use_rafari_skill() -> void:
+	var radius := 360.0
+	for index in enemies.size():
+		var enemy = enemies[index]
+		if player_pos.distance_to(enemy["pos"]) > radius + float(enemy["radius"]):
+			continue
+		enemy["slow_time"] = (4.0 if enemy["boss"] else 3.0) * slow_effect_multiplier
+		enemy["slow_factor"] = 0.32 if enemy["boss"] else 0.0
+		enemies[index] = enemy
+	effects.append({"kind": "ice", "pos": player_pos, "life": 0.65, "total": 0.65, "radius": radius})
+
+
 func _update_spawning(delta: float) -> void:
 	game_time += delta
 	spawn_timer -= delta
@@ -620,6 +714,11 @@ func _spawn_mutant(force_kind: String = "") -> void:
 		"dash_dir": Vector2.ZERO,
 		"contact_cooldown": 0.0,
 		"flash": 0.0,
+		"burn_time": 0.0,
+		"burn_tick": 0.0,
+		"burn_damage": 0.0,
+		"slow_time": 0.0,
+		"slow_factor": 1.0,
 	})
 
 
@@ -644,6 +743,11 @@ func _spawn_apostle() -> void:
 		"attack_cooldown": 1.8,
 		"summon_cooldown": 6.0,
 		"flash": 0.0,
+		"burn_time": 0.0,
+		"burn_tick": 0.0,
+		"burn_damage": 0.0,
+		"slow_time": 0.0,
+		"slow_factor": 1.0,
 	})
 	boss_bar.visible = true
 	boss_label.visible = true
@@ -732,6 +836,28 @@ func _update_projectiles(delta: float) -> void:
 			projectiles[projectile_index] = projectile
 
 
+func _update_enemy_statuses(delta: float) -> void:
+	for index in range(enemies.size() - 1, -1, -1):
+		if index >= enemies.size():
+			continue
+		var enemy = enemies[index]
+		enemy["slow_time"] = maxf(0.0, float(enemy.get("slow_time", 0.0)) - delta)
+		if float(enemy.get("burn_time", 0.0)) > 0.0:
+			enemy["burn_time"] = maxf(0.0, float(enemy["burn_time"]) - delta)
+			enemy["burn_tick"] = float(enemy.get("burn_tick", 0.0)) - delta
+			if float(enemy["burn_tick"]) <= 0.0:
+				enemy["burn_tick"] = 0.5
+				enemy["hp"] = float(enemy["hp"]) - float(enemy.get("burn_damage", 0.0))
+				enemy["flash"] = 0.08
+				if enemy["boss"]:
+					apostle_hp = maxf(0.0, float(enemy["hp"]))
+		if float(enemy["hp"]) <= 0.0:
+			enemies[index] = enemy
+			_kill_enemy(index)
+			continue
+		enemies[index] = enemy
+
+
 func _update_enemies(delta: float) -> void:
 	for index in range(enemies.size() - 1, -1, -1):
 		if index >= enemies.size():
@@ -740,9 +866,10 @@ func _update_enemies(delta: float) -> void:
 		enemy["flash"] = maxf(0.0, float(enemy["flash"]) - delta)
 		enemy["contact_cooldown"] = maxf(0.0, float(enemy["contact_cooldown"]) - delta)
 		var direction: Vector2 = enemy["pos"].direction_to(player_pos)
+		var status_speed := float(enemy.get("slow_factor", 1.0)) if float(enemy.get("slow_time", 0.0)) > 0.0 else 1.0
 
 		if enemy["boss"]:
-			enemy["pos"] += direction * float(enemy["speed"]) * delta
+			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 			enemy["attack_cooldown"] = float(enemy["attack_cooldown"]) - delta
 			enemy["summon_cooldown"] = float(enemy["summon_cooldown"]) - delta
 			if float(enemy["attack_cooldown"]) <= 0.0:
@@ -755,16 +882,16 @@ func _update_enemies(delta: float) -> void:
 		elif enemy["kind"] == "dasher":
 			if float(enemy["dash_time"]) > 0.0:
 				enemy["dash_time"] = float(enemy["dash_time"]) - delta
-				enemy["pos"] += enemy["dash_dir"] * float(enemy["speed"]) * 4.2 * delta
+				enemy["pos"] += enemy["dash_dir"] * float(enemy["speed"]) * 4.2 * status_speed * delta
 			else:
 				enemy["dash_cooldown"] = float(enemy["dash_cooldown"]) - delta
-				enemy["pos"] += direction * float(enemy["speed"]) * delta
+				enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 				if float(enemy["dash_cooldown"]) <= 0.0:
 					enemy["dash_dir"] = direction
 					enemy["dash_time"] = 0.42
 					enemy["dash_cooldown"] = rng.randf_range(2.4, 3.5)
 		else:
-			enemy["pos"] += direction * float(enemy["speed"]) * delta
+			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 
 		if enemy["pos"].distance_to(player_pos) <= float(enemy["radius"]) + 18.0 and float(enemy["contact_cooldown"]) <= 0.0:
 			_take_player_damage(22.0 if enemy["boss"] else (11.0 if enemy["elite"] else 7.0))
@@ -1015,6 +1142,12 @@ func _update_interface(delta: float) -> void:
 		("｜超載" if scythe_level >= 5 else ""),
 		("未取得" if needle_level == 0 else "Lv.%d" % needle_level),
 	]
+	var skill_name: String = CHARACTERS[selected_character]["skill_name"]
+	skill_label.text = "空白鍵｜%s\n%s" % [
+		skill_name,
+		("可施放" if skill_cooldown_remaining <= 0.0 else "冷卻 %.1f 秒" % skill_cooldown_remaining),
+	]
+	skill_label.modulate = Color(0.65, 1.0, 0.86) if skill_cooldown_remaining <= 0.0 else Color(0.7, 0.75, 0.84)
 	xp_bar.max_value = experience_required
 	xp_bar.value = experience
 
@@ -1147,6 +1280,10 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		var hp_ratio: float = float(enemy["hp"]) / float(enemy["max_hp"])
 		draw_rect(Rect2(position + Vector2(-radius, -radius - 11.0), Vector2(radius * 2.0, 4.0)), Color(0.18, 0.03, 0.08))
 		draw_rect(Rect2(position + Vector2(-radius, -radius - 11.0), Vector2(radius * 2.0 * hp_ratio, 4.0)), Color(1.0, 0.75, 0.22))
+	if float(enemy.get("burn_time", 0.0)) > 0.0:
+		draw_arc(position, radius + 8.0, -1.2, 2.2, 18, Color(1.0, 0.38, 0.08, 0.9), 4.0, true)
+	if float(enemy.get("slow_time", 0.0)) > 0.0:
+		draw_arc(position, radius + 10.0, 0.0, TAU, 24, Color(0.42, 0.82, 1.0, 0.9), 4.0, true)
 
 
 func _draw_effect(effect: Dictionary) -> void:
@@ -1163,6 +1300,16 @@ func _draw_effect(effect: Dictionary) -> void:
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.6 + progress), 0.0, TAU, 32, Color(1.0, 0.2, 0.28, alpha), 8.0)
 		"warning":
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.7 + 0.3 * progress), 0.0, TAU, 64, Color(1.0, 0.12, 0.4, alpha), 9.0)
+		"slash":
+			draw_arc(effect["pos"], float(effect["radius"]) * (0.55 + 0.45 * progress), -1.4, 2.7, 52, Color(1.0, 0.55, 0.65, alpha), 12.0, true)
+		"fire":
+			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(1.0, 0.26, 0.08, alpha * 0.16))
+			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 64, Color(1.0, 0.5, 0.14, alpha), 7.0, true)
+		"pulse":
+			draw_arc(effect["pos"], float(effect["radius"]) * (0.25 + 0.75 * progress), 0.0, TAU, 64, Color(0.35, 0.9, 1.0, alpha), 11.0, true)
+		"ice":
+			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(0.3, 0.65, 1.0, alpha * 0.14))
+			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 64, Color(0.55, 0.85, 1.0, alpha), 8.0, true)
 
 
 func _draw_player() -> void:
