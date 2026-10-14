@@ -1,0 +1,11 @@
+Noto Sans Traditional Chinese Variable Font
+===========================================
+
+File: NotoSansTC-VF.ttf
+Copyright: The Noto Project Authors
+License: SIL Open Font License 1.1
+Project: https://github.com/notofonts/noto-cjk
+License text: https://openfontlicense.org/open-font-license-official-text/
+
+This font is included so Traditional Chinese text renders consistently in the
+Web export. It is not an asset from 《星隕計畫 Ark Re:Code》.
