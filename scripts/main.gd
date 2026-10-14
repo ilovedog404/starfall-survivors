@@ -8,7 +8,7 @@ const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.3.1"
+const VERSION := "Beta0.3.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -127,7 +127,7 @@ var enemy_label: Label
 var weapon_label: Label
 var instruction_label: Label
 var skill_label: Label
-var pause_label: Label
+var pause_overlay: ColorRect
 var xp_bar: ProgressBar
 var boss_bar: ProgressBar
 var boss_label: Label
@@ -302,15 +302,6 @@ func _build_interface() -> void:
 	instruction_label.text = "WASD／方向鍵移動　空白鍵戰技　Tab 建構　Esc 暫停"
 	hud.add_child(instruction_label)
 
-	pause_label = Label.new()
-	pause_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	pause_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	pause_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	pause_label.text = "已暫停\n\n按 Esc 繼續"
-	pause_label.add_theme_font_size_override("font_size", 36)
-	pause_label.visible = false
-	hud.add_child(pause_label)
-
 	boss_bar = ProgressBar.new()
 	boss_bar.anchor_left = 0.25
 	boss_bar.anchor_right = 0.75
@@ -331,10 +322,74 @@ func _build_interface() -> void:
 	boss_label.visible = false
 	hud.add_child(boss_label)
 
+	_build_pause_overlay()
 	_build_upgrade_overlay()
 	_build_end_overlay()
 	_build_loadout_overlay()
 	_build_character_overlay()
+
+
+func _build_pause_overlay() -> void:
+	pause_overlay = ColorRect.new()
+	pause_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	pause_overlay.color = Color(0.008, 0.015, 0.045, 0.9)
+	pause_overlay.theme = ui_theme
+	pause_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	pause_overlay.visible = false
+	canvas_layer.add_child(pause_overlay)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.process_mode = Node.PROCESS_MODE_ALWAYS
+	pause_overlay.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(480.0, 430.0)
+	center.add_child(panel)
+
+	var column := VBoxContainer.new()
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_theme_constant_override("separation", 20)
+	panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "已暫停"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 38)
+	column.add_child(title)
+
+	var resume_button := Button.new()
+	resume_button.text = "繼續戰鬥"
+	resume_button.custom_minimum_size = Vector2(280.0, 56.0)
+	resume_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	resume_button.add_theme_font_size_override("font_size", 21)
+	resume_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	resume_button.pressed.connect(_resume_game)
+	column.add_child(resume_button)
+
+	var restart_button := Button.new()
+	restart_button.text = "重新開始本角色"
+	restart_button.custom_minimum_size = Vector2(280.0, 54.0)
+	restart_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	restart_button.add_theme_font_size_override("font_size", 19)
+	restart_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	restart_button.pressed.connect(_start_game)
+	column.add_child(restart_button)
+
+	var select_button := Button.new()
+	select_button.text = "返回角色選擇"
+	select_button.custom_minimum_size = Vector2(280.0, 54.0)
+	select_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	select_button.add_theme_font_size_override("font_size", 19)
+	select_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	select_button.pressed.connect(_show_character_select)
+	column.add_child(select_button)
+
+	var hint := Label.new()
+	hint.text = "按 Esc 也可繼續"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 16)
+	column.add_child(hint)
 
 
 func _build_upgrade_overlay() -> void:
@@ -586,7 +641,7 @@ func _show_character_select() -> void:
 	build_open = false
 	upgrade_overlay.visible = false
 	end_overlay.visible = false
-	pause_label.visible = false
+	pause_overlay.visible = false
 	build_overlay.visible = false
 	character_overlay.visible = true
 	_choose_character(selected_character)
@@ -669,7 +724,7 @@ func _start_game() -> void:
 	build_overlay.visible = false
 	upgrade_overlay.visible = false
 	end_overlay.visible = false
-	pause_label.visible = false
+	pause_overlay.visible = false
 	boss_bar.visible = false
 	boss_label.visible = false
 	instruction_label.visible = true
@@ -687,7 +742,15 @@ func _handle_pause_input() -> void:
 		return
 	manual_paused = not manual_paused
 	get_tree().paused = manual_paused
-	pause_label.visible = manual_paused
+	pause_overlay.visible = manual_paused
+
+
+func _resume_game() -> void:
+	if not manual_paused:
+		return
+	manual_paused = false
+	pause_overlay.visible = false
+	get_tree().paused = false
 
 
 func _handle_build_input() -> void:

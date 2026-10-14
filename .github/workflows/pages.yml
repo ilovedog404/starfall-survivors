@@ -41,13 +41,15 @@ jobs:
           cp -R "$RUNNER_TEMP/templates/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
           chmod +x "$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64"
 
-      - name: Export Web build
+      - name: Test and export Web build
         shell: bash
         run: |
           set -euo pipefail
           GODOT="$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64"
           mkdir -p public
           "$GODOT" --headless --editor --import --path .
+          "$GODOT" --headless --path . --scene res://tests/smoke_test.tscn --quit-after 240
+          "$GODOT" --headless --path . --scene res://tests/simulation_test.tscn --quit-after 240
           "$GODOT" --headless --path . --export-release Web "$PWD/public/index.html"
 
       - name: Configure GitHub Pages

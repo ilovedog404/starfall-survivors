@@ -34,7 +34,7 @@ jobs:
           cp -R "$RUNNER_TEMP/templates/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
           chmod +x "$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64"
 
-      - name: Export and package Web build
+      - name: Test, export, and package Web build
         shell: bash
         run: |
           set -euo pipefail
@@ -43,6 +43,8 @@ jobs:
           test -f "$NOTES"
           mkdir -p public dist
           "$GODOT" --headless --editor --import --path .
+          "$GODOT" --headless --path . --scene res://tests/smoke_test.tscn --quit-after 240
+          "$GODOT" --headless --path . --scene res://tests/simulation_test.tscn --quit-after 240
           "$GODOT" --headless --path . --export-release Web "$PWD/public/index.html"
           cp "$NOTES" public/版本說明.txt
           (cd public && zip -q -r "../dist/星隕倖存者-${GITHUB_REF_NAME}-Web.zip" .)

@@ -61,6 +61,13 @@ func _run() -> void:
 	if game.build_open or game.build_overlay.visible:
 		_fail("當前建構面板沒有正確關閉")
 		return
+	game.manual_paused = true
+	game.pause_overlay.visible = true
+	get_tree().paused = true
+	game._resume_game()
+	if game.manual_paused or game.pause_overlay.visible or get_tree().paused:
+		_fail("滑鼠暫停選單無法繼續戰鬥")
+		return
 	game._spawn_mutant("shooter")
 	game.enemies[0]["pos"] = game.player_pos + Vector2(300.0, 0.0)
 	game.enemies[0]["attack_cooldown"] = 0.0
@@ -158,7 +165,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-select/build/enemy-types/waves/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: character-select/pause-menu/build/enemy-types/waves/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
