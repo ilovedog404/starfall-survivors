@@ -14,6 +14,19 @@ func _run() -> void:
 
 	var game = packed_scene.instantiate()
 	get_tree().root.add_child(game)
+	if not game.character_overlay.visible or game.run_started:
+		_fail("角色選擇畫面沒有在啟動時顯示")
+		return
+	for character_id in ["epathy", "lucia", "claire", "rafari"]:
+		game._choose_character(character_id)
+		if game.selected_character != character_id:
+			_fail("無法選擇角色：" + character_id)
+			return
+	game._choose_character("epathy")
+	game._start_game()
+	if game.player_armor != 3.0 or game.close_damage_multiplier <= 1.0:
+		_fail("埃帕蒂的初始被動沒有套用")
+		return
 
 	if game.level != 1 or game.scythe_level != 1:
 		_fail("初始角色狀態不正確")
@@ -61,7 +74,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: movement/combat/xp/upgrade/apostle/result")
+	print("SMOKE_TEST_PASS: character-select/movement/combat/xp/upgrade/apostle/result")
 	get_tree().quit(0)
 
 

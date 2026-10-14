@@ -7,7 +7,37 @@ const RUN_DURATION := 300.0
 const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
-const VERSION := "Beta0.1.1"
+const VERSION := "Beta0.1.2"
+const CHARACTERS := {
+	"epathy": {
+		"name": "埃帕蒂",
+		"role": "近戰／生存",
+		"passive": "護甲 +3；近距離傷害提高 20%",
+		"skill": "戰技預覽：用刀攻擊並擊退周圍敵人",
+		"color": Color(1.0, 0.48, 0.55),
+	},
+	"lucia": {
+		"name": "璐茜婭",
+		"role": "法術／持續傷害",
+		"passive": "燃燒持續時間 +30%",
+		"skill": "戰技預覽：點燃全畫面已受傷敵人",
+		"color": Color(0.92, 0.45, 1.0),
+	},
+	"claire": {
+		"name": "克萊兒",
+		"role": "新手／均衡",
+		"passive": "初始武器：星源鐮環",
+		"skill": "範圍傷害與護盾兼備，適合第一次遊玩",
+		"color": Color(0.6, 0.92, 1.0),
+	},
+	"rafari": {
+		"name": "菈法瑞・零度・諾恩",
+		"role": "控場／冰霜",
+		"passive": "減速效果提高",
+		"skill": "戰技預覽：凍結普通敵人，首領大幅減速",
+		"color": Color(0.55, 0.72, 1.0),
+	},
+}
 
 var rng := RandomNumberGenerator.new()
 var camera: Camera2D
@@ -22,6 +52,11 @@ var player_armor := 0.0
 var player_invulnerable := 0.0
 var pickup_radius := 115.0
 var damage_multiplier := 1.0
+var close_damage_multiplier := 1.0
+var burn_duration_multiplier := 1.0
+var slow_effect_multiplier := 1.0
+var selected_character := "claire"
+var run_started := false
 
 var game_time := 0.0
 var spawn_timer := 0.0
@@ -81,6 +116,9 @@ var upgrade_buttons: HBoxContainer
 var end_overlay: ColorRect
 var end_title: Label
 var end_summary: Label
+var character_overlay: ColorRect
+var character_detail: Label
+var character_buttons: Dictionary = {}
 
 
 func _ready() -> void:
@@ -89,7 +127,7 @@ func _ready() -> void:
 	_ensure_input_map()
 	_create_camera()
 	_build_interface()
-	_start_game()
+	_show_character_select()
 
 
 func _process(delta: float) -> void:
@@ -97,7 +135,7 @@ func _process(delta: float) -> void:
 	if get_tree().paused:
 		queue_redraw()
 		return
-	if game_over:
+	if game_over or not run_started:
 		return
 
 	_update_player(delta)
@@ -245,6 +283,7 @@ func _build_interface() -> void:
 
 	_build_upgrade_overlay()
 	_build_end_overlay()
+	_build_character_overlay()
 
 
 func _build_upgrade_overlay() -> void:
@@ -332,6 +371,15 @@ func _build_end_overlay() -> void:
 	restart_button.pressed.connect(_start_game)
 	column.add_child(restart_button)
 
+	var select_button := Button.new()
+	select_button.text = "返回角色選擇"
+	select_button.custom_minimum_size = Vector2(260.0, 50.0)
+	select_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	select_button.add_theme_font_size_override("font_size", 19)
+	select_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	select_button.pressed.connect(_show_character_select)
+	column.add_child(select_button)
+
 	var disclaimer := Label.new()
 	disclaimer.text = "%s｜非官方同人原型｜所有圖形皆為程式暫代素材" % VERSION
 	disclaimer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -339,8 +387,111 @@ func _build_end_overlay() -> void:
 	column.add_child(disclaimer)
 
 
+func _build_character_overlay() -> void:
+	character_overlay = ColorRect.new()
+	character_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	character_overlay.color = Color(0.008, 0.015, 0.045, 0.98)
+	character_overlay.theme = ui_theme
+	character_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	canvas_layer.add_child(character_overlay)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.process_mode = Node.PROCESS_MODE_ALWAYS
+	character_overlay.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(1180.0, 640.0)
+	center.add_child(panel)
+
+	var column := VBoxContainer.new()
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_theme_constant_override("separation", 16)
+	panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "星隕倖存者"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 42)
+	column.add_child(title)
+
+	var subtitle := Label.new()
+	subtitle.text = "選擇本次出擊角色｜五分鐘原型"
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.add_theme_font_size_override("font_size", 20)
+	column.add_child(subtitle)
+
+	var cards := HBoxContainer.new()
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards.add_theme_constant_override("separation", 12)
+	cards.process_mode = Node.PROCESS_MODE_ALWAYS
+	column.add_child(cards)
+
+	for character_id in CHARACTERS:
+		var data: Dictionary = CHARACTERS[character_id]
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(268.0, 250.0)
+		button.text = "%s\n\n%s\n\n%s" % [data["name"], data["role"], data["passive"]]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.add_theme_font_size_override("font_size", 18)
+		button.process_mode = Node.PROCESS_MODE_ALWAYS
+		button.pressed.connect(_choose_character.bind(character_id))
+		cards.add_child(button)
+		character_buttons[character_id] = button
+
+	character_detail = Label.new()
+	character_detail.custom_minimum_size = Vector2(0.0, 58.0)
+	character_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	character_detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	character_detail.add_theme_font_size_override("font_size", 18)
+	column.add_child(character_detail)
+
+	var start_button := Button.new()
+	start_button.text = "開始出擊"
+	start_button.custom_minimum_size = Vector2(320.0, 62.0)
+	start_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	start_button.add_theme_font_size_override("font_size", 24)
+	start_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	start_button.pressed.connect(_start_game)
+	column.add_child(start_button)
+
+	var disclaimer := Label.new()
+	disclaimer.text = "%s｜免費、非商業、非官方同人原型" % VERSION
+	disclaimer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	disclaimer.add_theme_font_size_override("font_size", 14)
+	column.add_child(disclaimer)
+
+	_choose_character(selected_character)
+
+
+func _choose_character(character_id: String) -> void:
+	if not CHARACTERS.has(character_id):
+		return
+	selected_character = character_id
+	var data: Dictionary = CHARACTERS[selected_character]
+	character_detail.text = "%s｜%s\n%s" % [data["name"], data["role"], data["skill"]]
+	for button_id in character_buttons:
+		var button: Button = character_buttons[button_id]
+		button.modulate = Color.WHITE if button_id == selected_character else Color(0.62, 0.66, 0.75)
+
+
+func _show_character_select() -> void:
+	get_tree().paused = true
+	run_started = false
+	game_over = false
+	choosing_upgrade = false
+	manual_paused = false
+	upgrade_overlay.visible = false
+	end_overlay.visible = false
+	pause_label.visible = false
+	character_overlay.visible = true
+	_choose_character(selected_character)
+	queue_redraw()
+
+
 func _start_game() -> void:
 	get_tree().paused = false
+	run_started = true
 	game_over = false
 	choosing_upgrade = false
 	manual_paused = false
@@ -360,6 +511,17 @@ func _start_game() -> void:
 	player_invulnerable = 0.0
 	pickup_radius = 115.0
 	damage_multiplier = 1.0
+	close_damage_multiplier = 1.0
+	burn_duration_multiplier = 1.0
+	slow_effect_multiplier = 1.0
+	match selected_character:
+		"epathy":
+			player_armor = 3.0
+			close_damage_multiplier = 1.2
+		"lucia":
+			burn_duration_multiplier = 1.3
+		"rafari":
+			slow_effect_multiplier = 1.35
 
 	level = 1
 	experience = 0.0
@@ -387,6 +549,7 @@ func _start_game() -> void:
 	apostle_max_hp = 0.0
 
 	camera.position = player_pos
+	character_overlay.visible = false
 	upgrade_overlay.visible = false
 	end_overlay.visible = false
 	pause_label.visible = false
@@ -400,7 +563,7 @@ func _start_game() -> void:
 func _handle_pause_input() -> void:
 	if not Input.is_action_just_pressed("pause"):
 		return
-	if choosing_upgrade or game_over:
+	if choosing_upgrade or game_over or not run_started:
 		return
 	manual_paused = not manual_paused
 	get_tree().paused = manual_paused
@@ -504,7 +667,7 @@ func _update_weapons(delta: float) -> void:
 
 
 func _fire_scythe_ring() -> void:
-	var dealt_damage := scythe_damage * damage_multiplier
+	var dealt_damage := scythe_damage * damage_multiplier * close_damage_multiplier
 	if scythe_level >= 5:
 		dealt_damage *= 1.35
 	for index in range(enemies.size() - 1, -1, -1):
@@ -833,7 +996,9 @@ func _update_interface(delta: float) -> void:
 	var minutes := int(game_time) / 60
 	var seconds := int(game_time) % 60
 	time_label.text = "%02d:%02d" % [minutes, seconds]
-	stats_label.text = "克萊兒　Lv.%d\n生命 %d / %d　護盾 %d\n護甲 %d　擊殺 %d" % [
+	var character_name: String = CHARACTERS[selected_character]["name"]
+	stats_label.text = "%s　Lv.%d\n生命 %d / %d　護盾 %d\n護甲 %d　擊殺 %d" % [
+		character_name,
 		level,
 		ceili(player_health),
 		ceili(player_max_health),
@@ -1002,7 +1167,8 @@ func _draw_effect(effect: Dictionary) -> void:
 
 func _draw_player() -> void:
 	var flicker := player_invulnerable > 0.0 and int(player_invulnerable * 24.0) % 2 == 0
-	var body_color := Color(0.6, 0.92, 1.0, 0.35 if flicker else 1.0)
+	var character_color: Color = CHARACTERS[selected_character]["color"]
+	var body_color := Color(character_color, 0.35 if flicker else 1.0)
 	draw_circle(player_pos, 18.0, body_color)
 	draw_arc(player_pos, 23.0, -0.9, 3.9, 30, Color(0.74, 0.96, 1.0, 0.85), 5.0, true)
 	draw_line(player_pos + Vector2(-10.0, 12.0), player_pos + Vector2(13.0, -14.0), Color(0.85, 0.98, 1.0), 4.0, true)
