@@ -108,6 +108,18 @@ func _run() -> void:
 		return
 	game.enemies.clear()
 	game.hostile_projectiles.clear()
+	game._spawn_mutant("dasher")
+	game.enemies[0]["pos"] = game.player_pos + Vector2(220.0, 0.0)
+	game.enemies[0]["dash_cooldown"] = 0.0
+	game._update_enemies(0.01)
+	if float(game.enemies[0]["dash_charge"]) <= 0.0 or game.enemies[0]["dash_dir"] == Vector2.ZERO:
+		_fail("奔襲型異變體沒有進入衝刺預警")
+		return
+	game._update_enemies(0.5)
+	if float(game.enemies[0]["dash_time"]) <= 0.0:
+		_fail("奔襲型異變體預警後沒有開始衝刺")
+		return
+	game.enemies.clear()
 	game._spawn_mutant("tank")
 	if float(game.enemies[0]["hp"]) < 90.0 or float(game.enemies[0]["radius"]) < 20.0:
 		_fail("重裝型異變體數值不正確")
@@ -237,7 +249,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

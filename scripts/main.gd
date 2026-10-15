@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.6.2"
+const VERSION := "Beta0.7.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -1004,6 +1004,7 @@ func _spawn_mutant(force_kind: String = "") -> void:
 		"boss": false,
 		"dash_cooldown": rng.randf_range(1.4, 3.2),
 		"dash_time": 0.0,
+		"dash_charge": 0.0,
 		"dash_dir": Vector2.ZERO,
 		"contact_cooldown": 0.0,
 		"attack_cooldown": rng.randf_range(0.5, 2.2),
@@ -1032,6 +1033,7 @@ func _spawn_apostle() -> void:
 		"boss": true,
 		"dash_cooldown": 2.4,
 		"dash_time": 0.0,
+		"dash_charge": 0.0,
 		"dash_dir": Vector2.ZERO,
 		"contact_cooldown": 0.0,
 		"attack_cooldown": 1.8,
@@ -1234,7 +1236,13 @@ func _update_enemies(delta: float) -> void:
 				_fire_mutant_shot(enemy["pos"])
 				enemy["attack_cooldown"] = rng.randf_range(2.1, 2.8)
 		elif enemy["kind"] == "dasher":
-			if float(enemy["dash_time"]) > 0.0:
+			if float(enemy.get("dash_charge", 0.0)) > 0.0:
+				enemy["dash_charge"] = float(enemy["dash_charge"]) - delta
+				if float(enemy["dash_charge"]) <= 0.0:
+					enemy["dash_charge"] = 0.0
+					enemy["dash_time"] = 0.42
+					enemy["dash_cooldown"] = rng.randf_range(2.4, 3.5)
+			elif float(enemy["dash_time"]) > 0.0:
 				enemy["dash_time"] = float(enemy["dash_time"]) - delta
 				enemy["pos"] += enemy["dash_dir"] * float(enemy["speed"]) * 4.2 * status_speed * delta
 			else:
@@ -1242,8 +1250,7 @@ func _update_enemies(delta: float) -> void:
 				enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 				if float(enemy["dash_cooldown"]) <= 0.0:
 					enemy["dash_dir"] = direction
-					enemy["dash_time"] = 0.42
-					enemy["dash_cooldown"] = rng.randf_range(2.4, 3.5)
+					enemy["dash_charge"] = 0.48
 		else:
 			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 
@@ -1765,6 +1772,11 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		base_color = Color.WHITE
 	match enemy["kind"]:
 		"dasher":
+			if float(enemy.get("dash_charge", 0.0)) > 0.0:
+				var telegraph_alpha := 0.45 + 0.4 * sin(float(enemy["dash_charge"]) * 30.0)
+				var dash_direction: Vector2 = enemy.get("dash_dir", Vector2.RIGHT)
+				draw_line(position, position + dash_direction * 165.0, Color(1.0, 0.42, 0.12, telegraph_alpha), 7.0, true)
+				draw_arc(position, radius + 8.0, 0.0, TAU, 24, Color(1.0, 0.75, 0.2, telegraph_alpha), 4.0, true)
 			var dasher_points := PackedVector2Array([
 				position + Vector2(0.0, -radius),
 				position + Vector2(radius, 0.0),
