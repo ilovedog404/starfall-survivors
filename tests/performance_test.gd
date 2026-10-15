@@ -55,8 +55,36 @@ func _run() -> void:
 		_fail("異變體數量上限失效")
 		return
 
-	print("PERFORMANCE_TEST_PASS: enemies=%d gems=%d repair_cores=%d effects=%d xp=%.0f" % [
-		game.enemies.size(), game.gems.size(), game.repair_cores.size(), game.effects.size(), stored_experience,
+	for index in game.MAX_PLAYER_PROJECTILES + 20:
+		game.projectiles.append({
+			"pos": game.player_pos + Vector2(-520.0, float(index % 20) * 8.0),
+			"velocity": Vector2.ZERO,
+			"damage": 0.0,
+			"source": "other",
+			"radius": 4.0,
+			"life": 5.0,
+		})
+	for index in game.MAX_HOSTILE_PROJECTILES + 20:
+		game.hostile_projectiles.append({"pos": game.player_pos + Vector2(500.0, 0.0), "velocity": Vector2.ZERO, "radius": 5.0, "damage": 0.0, "life": 5.0})
+	game._enforce_runtime_limits()
+	if game.projectiles.size() > game.MAX_PLAYER_PROJECTILES or game.hostile_projectiles.size() > game.MAX_HOSTILE_PROJECTILES:
+		_fail("投射物執行期上限失效")
+		return
+	if game._is_world_visible(game.player_pos + Vector2(5000.0, 0.0)):
+		_fail("畫面外物件沒有被視野裁切")
+		return
+
+	game.projectiles = game.projectiles.slice(0, 40)
+	var stress_start := Time.get_ticks_usec()
+	for frame in 30:
+		game._update_projectiles(1.0 / 60.0)
+	var stress_milliseconds := float(Time.get_ticks_usec() - stress_start) / 1000.0
+	if stress_milliseconds > 15000.0:
+		_fail("大量敵人投射物碰撞測試逾時：%.1fms" % stress_milliseconds)
+		return
+
+	print("PERFORMANCE_TEST_PASS: enemies=%d gems=%d repair_cores=%d effects=%d projectiles=%d hostile=%d collision_stress=%.1fms xp=%.0f" % [
+		game.enemies.size(), game.gems.size(), game.repair_cores.size(), game.effects.size(), game.projectiles.size(), game.hostile_projectiles.size(), stress_milliseconds, stored_experience,
 	])
 	get_tree().quit(0)
 

@@ -38,8 +38,8 @@ func _run() -> void:
 	game.enemies[0]["hp"] = 500.0
 	game.enemies[0]["max_hp"] = 500.0
 	game._fire_scythe_ring()
-	if game.projectiles.size() != 1 or game.projectiles[0].get("kind", "") != "fireball" or game.projectiles[0].get("color", Color.BLACK) != game._starter_ring_color():
-		_fail("璐茜婭 Lv.1 沒有射出一顆專屬色火球")
+	if game.projectiles.size() != 10 or game.projectiles[0].get("kind", "") != "fireball" or game.projectiles[0].get("color", Color.BLACK) != game._starter_ring_color() or float(game.projectiles[0]["life"]) >= 1.0:
+		_fail("璐茜婭 Lv.1 沒有射出 10 發短射程專屬色火球")
 		return
 	game._update_projectiles(0.1)
 	if float(game.enemies[0]["burn_time"]) <= 0.0 or float(game.enemies[0]["hp"]) >= 500.0 or game._starter_weapon_name() != "緋色脈衝":
@@ -51,14 +51,14 @@ func _run() -> void:
 		game.enemies[-1]["pos"] = game.player_pos + Vector2(90.0, (extra_target + 1) * 50.0)
 	game.scythe_level = 3
 	game._fire_scythe_ring()
-	if game.projectiles.size() != 2:
-		_fail("璐茜婭 Lv.3 沒有增加為兩顆火球")
+	if game.projectiles.size() != 12:
+		_fail("璐茜婭 Lv.3 沒有增加為 12 發火球")
 		return
 	game.projectiles.clear()
 	game.scythe_level = 5
 	game._fire_scythe_ring()
-	if game.projectiles.size() != 3:
-		_fail("璐茜婭 Lv.5 沒有增加為三顆火球")
+	if game.projectiles.size() != 14:
+		_fail("璐茜婭 Lv.5 沒有增加為 14 發火球")
 		return
 
 	game._show_character_select()
@@ -86,6 +86,25 @@ func _run() -> void:
 	game._show_character_select()
 	game._choose_character("epathy")
 	game._start_game()
+	if not game.gm_panel.visible or game.gm_panel.get_child_count() == 0:
+		_fail("遊戲左側沒有顯示 GM 測試按鍵")
+		return
+	game._toggle_gm_speed()
+	if not game.gm_triple_speed or not is_equal_approx(Engine.time_scale, 3.0):
+		_fail("GM 3 倍速按鍵沒有生效")
+		return
+	game._toggle_gm_speed()
+	var gm_rerolls_before: int = game.rerolls_remaining
+	game._gm_add_reroll()
+	if game.rerolls_remaining != gm_rerolls_before + 1:
+		_fail("GM 增加重骰次數按鍵沒有生效")
+		return
+	var gm_level_before: int = game.level
+	game._gm_level_up()
+	if game.level != gm_level_before + 1 or not game.choosing_upgrade:
+		_fail("GM 升級按鍵沒有觸發升級選擇")
+		return
+	game._select_upgrade(game.current_upgrade_choices[0]["id"])
 	if game.player_armor != 3.0 or game.close_damage_multiplier <= 1.0:
 		_fail("埃帕蒂的初始被動沒有套用")
 		return
@@ -281,10 +300,11 @@ func _run() -> void:
 		return
 	var old_scythe_radius_for_area: float = game.scythe_radius
 	var old_storm_radius_for_area: float = game.storm_radius
+	var old_projectile_area_scale: float = game.projectile_area_scale
 	game.pending_levels = 1
 	game._select_upgrade("area")
-	if game.scythe_radius <= old_scythe_radius_for_area or game.storm_radius <= old_storm_radius_for_area:
-		_fail("廣域線圈沒有提高環域或雷暴範圍")
+	if game.scythe_radius <= old_scythe_radius_for_area or game.storm_radius <= old_storm_radius_for_area or game.projectile_area_scale <= old_projectile_area_scale:
+		_fail("廣域線圈沒有提高專屬能力、投射物或雷暴範圍")
 		return
 	game.needle_level = 5
 	game.meta_levels["cooldown"] = 3
@@ -377,7 +397,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: rafari-name/auto-aim-slash/fireball-count/targeted-frost/automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: gm-controls/lucia-shotgun/fixed-area-coil/render-culling/projectile-limits/rafari-name/auto-aim-slash/targeted-frost/automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

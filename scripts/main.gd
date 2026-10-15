@@ -9,7 +9,11 @@ const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
-const MAX_EFFECTS := 320
+const MAX_EFFECTS := 220
+const MAX_PLAYER_PROJECTILES := 220
+const MAX_HOSTILE_PROJECTILES := 180
+const LOW_DETAIL_ENEMY_COUNT := 220
+const DRAW_MARGIN := 180.0
 const WAVE_TIMES := [60.0, 120.0, 180.0]
 const VERSION := "Beta0.10.2"
 const CHARACTERS := {
@@ -28,10 +32,10 @@ const CHARACTERS := {
 		"name": "璐茜婭",
 		"role": "法術／持續傷害",
 		"passive": "燃燒持續時間 +30%",
-		"skill": "自動向最近異變體發射火球，升級後增加火球數量",
+		"skill": "自動向最近異變體發射短射程火球霰彈",
 		"skill_name": "緋色脈衝",
 		"starter_weapon": "緋色脈衝",
-		"starter_trait": "自動追蹤火球，命中後附加燃燒",
+		"starter_trait": "一次射出 10 發短射程火球並附加燃燒",
 		"ring_color": Color(1.0, 0.42, 0.16),
 		"color": Color(0.92, 0.45, 1.0),
 	},
@@ -75,6 +79,7 @@ var damage_multiplier := 1.0
 var close_damage_multiplier := 1.0
 var burn_duration_multiplier := 1.0
 var slow_effect_multiplier := 1.0
+var projectile_area_scale := 1.0
 var selected_character := "claire"
 var run_started := false
 var build_open := false
@@ -98,6 +103,8 @@ var manual_paused := false
 var pending_levels := 0
 var instruction_time := 10.0
 var wave_index := 0
+var hud_refresh_timer := 0.0
+var gm_triple_speed := false
 
 var level := 1
 var experience := 0.0
@@ -168,6 +175,10 @@ var end_summary: Label
 var character_overlay: ColorRect
 var character_detail: Label
 var character_buttons: Dictionary = {}
+var gm_panel: PanelContainer
+var gm_speed_button: Button
+var gm_level_button: Button
+var gm_reroll_button: Button
 
 
 func _ready() -> void:
@@ -344,11 +355,54 @@ func _build_interface() -> void:
 	boss_label.visible = false
 	hud.add_child(boss_label)
 
+	_build_gm_panel()
+
 	_build_pause_overlay()
 	_build_upgrade_overlay()
 	_build_end_overlay()
 	_build_loadout_overlay()
 	_build_character_overlay()
+
+
+func _build_gm_panel() -> void:
+	gm_panel = PanelContainer.new()
+	gm_panel.position = Vector2(16.0, 142.0)
+	gm_panel.custom_minimum_size = Vector2(178.0, 174.0)
+	gm_panel.theme = ui_theme
+	gm_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	gm_panel.visible = false
+	canvas_layer.add_child(gm_panel)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 7)
+	gm_panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "GM 測試"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 16)
+	column.add_child(title)
+
+	gm_speed_button = Button.new()
+	gm_speed_button.text = "3 倍速：關"
+	gm_speed_button.custom_minimum_size = Vector2(160.0, 36.0)
+	gm_speed_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	gm_speed_button.pressed.connect(_toggle_gm_speed)
+	column.add_child(gm_speed_button)
+
+	gm_level_button = Button.new()
+	gm_level_button.text = "立即升級"
+	gm_level_button.custom_minimum_size = Vector2(160.0, 36.0)
+	gm_level_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	gm_level_button.pressed.connect(_gm_level_up)
+	column.add_child(gm_level_button)
+
+	gm_reroll_button = Button.new()
+	gm_reroll_button.text = "重骰次數 +1"
+	gm_reroll_button.custom_minimum_size = Vector2(160.0, 36.0)
+	gm_reroll_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	gm_reroll_button.pressed.connect(_gm_add_reroll)
+	column.add_child(gm_reroll_button)
 
 
 func _build_pause_overlay() -> void:
@@ -658,6 +712,7 @@ func _choose_character(character_id: String) -> void:
 
 
 func _show_character_select() -> void:
+	_set_gm_speed(false)
 	get_tree().paused = true
 	run_started = false
 	game_over = false
@@ -669,11 +724,13 @@ func _show_character_select() -> void:
 	pause_overlay.visible = false
 	build_overlay.visible = false
 	character_overlay.visible = true
+	gm_panel.visible = false
 	_choose_character(selected_character)
 	queue_redraw()
 
 
 func _start_game() -> void:
+	_set_gm_speed(false)
 	get_tree().paused = false
 	run_started = true
 	game_over = false
@@ -691,6 +748,7 @@ func _start_game() -> void:
 	damage_by_source = {"starter": 0.0, "needle": 0.0, "storm": 0.0, "skill": 0.0, "burn": 0.0, "other": 0.0}
 	instruction_time = 10.0
 	wave_index = 0
+	hud_refresh_timer = 0.0
 
 	player_pos = Vector2.ZERO
 	player_speed = 255.0
@@ -705,6 +763,7 @@ func _start_game() -> void:
 	close_damage_multiplier = 1.0
 	burn_duration_multiplier = 1.0
 	slow_effect_multiplier = 1.0
+	projectile_area_scale = 1.0
 	match selected_character:
 		"epathy":
 			player_armor = 3.0
@@ -757,11 +816,55 @@ func _start_game() -> void:
 	upgrade_overlay.visible = false
 	end_overlay.visible = false
 	pause_overlay.visible = false
+	gm_panel.visible = true
 	boss_bar.visible = false
 	boss_label.visible = false
 	instruction_label.visible = true
 	_update_interface(0.0)
 	queue_redraw()
+
+
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
+
+
+func _set_gm_speed(enabled: bool) -> void:
+	gm_triple_speed = enabled
+	Engine.time_scale = 3.0 if gm_triple_speed else 1.0
+	if is_instance_valid(gm_speed_button):
+		gm_speed_button.text = "3 倍速：開" if gm_triple_speed else "3 倍速：關"
+
+
+func _toggle_gm_speed() -> void:
+	if not run_started or game_over:
+		return
+	_set_gm_speed(not gm_triple_speed)
+	_show_game_notice("GM：遊戲速度 ×%d" % (3 if gm_triple_speed else 1))
+
+
+func _gm_level_up() -> void:
+	if not run_started or game_over or manual_paused or build_open:
+		return
+	_gain_experience(maxf(0.0, experience_required - experience))
+	_show_game_notice("GM：獲得 1 次升級")
+
+
+func _gm_add_reroll() -> void:
+	if not run_started or game_over:
+		return
+	rerolls_remaining += 1
+	if choosing_upgrade:
+		reroll_button.text = "[R] 重新抽取（剩餘 %d 次）" % rerolls_remaining
+		reroll_button.disabled = false
+	if build_open:
+		_update_build_text()
+	_show_game_notice("GM：重骰次數 +1（目前 %d）" % rerolls_remaining)
+
+
+func _show_game_notice(message: String) -> void:
+	instruction_label.text = message
+	instruction_label.visible = true
+	instruction_time = 2.0
 
 
 func _handle_pause_input() -> void:
@@ -864,7 +967,8 @@ func _use_epathy_skill() -> void:
 	var half_arc := 1.25
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
-		if player_pos.distance_to(enemy["pos"]) > radius + float(enemy["radius"]):
+		var hit_radius: float = radius + float(enemy["radius"])
+		if player_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
 			continue
 		var enemy_direction: Vector2 = player_pos.direction_to(enemy["pos"])
 		if absf(wrapf(enemy_direction.angle() - slash_angle, -PI, PI)) > half_arc:
@@ -879,26 +983,32 @@ func _use_epathy_skill() -> void:
 func _use_lucia_skill() -> void:
 	if enemies.is_empty():
 		return
-	var shot_count := 1
-	if scythe_level >= 3:
-		shot_count += 1
-	if scythe_level >= 5:
-		shot_count += 1
-	for enemy_index in _nearest_enemy_indices(shot_count):
-		if enemy_index < 0 or enemy_index >= enemies.size():
-			continue
-		var target_pos: Vector2 = enemies[enemy_index]["pos"]
-		var direction := player_pos.direction_to(target_pos)
+	var nearest := _nearest_enemy_indices(1)
+	if nearest.is_empty():
+		return
+	var target_index: int = nearest[0]
+	if target_index < 0 or target_index >= enemies.size():
+		return
+	var aim_direction := player_pos.direction_to(enemies[target_index]["pos"])
+	var shot_count := 10 + (2 if scythe_level >= 3 else 0) + (2 if scythe_level >= 5 else 0)
+	var spread := 0.92 + 0.05 * float(scythe_level - 1)
+	var speed := 500.0
+	var travel_distance := 270.0 + maxf(0.0, scythe_radius - 132.0) * 1.25
+	for shot_index in shot_count:
+		if projectiles.size() >= MAX_PLAYER_PROJECTILES:
+			break
+		var ratio := 0.5 if shot_count <= 1 else float(shot_index) / float(shot_count - 1)
+		var direction := aim_direction.rotated(lerpf(-spread * 0.5, spread * 0.5, ratio))
 		projectiles.append({
 			"kind": "fireball",
 			"pos": player_pos,
-			"velocity": direction * 420.0,
-			"damage": scythe_damage * 0.9 * damage_multiplier,
+			"velocity": direction * speed,
+			"damage": scythe_damage * 0.38 * damage_multiplier,
 			"source": "starter",
-			"radius": 10.0,
-			"life": 2.2,
-			"burn_time": 1.8 * burn_duration_multiplier,
-			"burn_damage": scythe_damage * 0.15 * damage_multiplier,
+			"radius": 8.0 * projectile_area_scale,
+			"life": travel_distance / speed,
+			"burn_time": 1.5 * burn_duration_multiplier,
+			"burn_damage": scythe_damage * 0.08 * damage_multiplier,
 			"color": _starter_ring_color(),
 		})
 
@@ -907,7 +1017,8 @@ func _use_claire_skill() -> void:
 	var radius := scythe_radius
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
-		if player_pos.distance_to(enemy["pos"]) <= radius + float(enemy["radius"]):
+		var hit_radius: float = radius + float(enemy["radius"])
+		if player_pos.distance_squared_to(enemy["pos"]) <= hit_radius * hit_radius:
 			_damage_enemy(index, scythe_damage * damage_multiplier, "starter")
 	var shield_restore := 1.2 + scythe_level * 0.35 + (3.0 if scythe_evolved else 0.0)
 	player_shield = minf(player_max_shield, player_shield + shield_restore)
@@ -927,7 +1038,8 @@ func _use_rafari_skill() -> void:
 	var radius := minf(90.0, 58.0 + maxf(0.0, scythe_radius - 132.0) * 0.35)
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
-		if target_pos.distance_to(enemy["pos"]) > radius + float(enemy["radius"]):
+		var hit_radius: float = radius + float(enemy["radius"])
+		if target_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
 			continue
 		var base_slow_time := (1.8 if enemy["boss"] else 1.1) + scythe_level * 0.12
 		enemy["slow_time"] = base_slow_time * slow_effect_multiplier
@@ -1107,6 +1219,8 @@ func _fire_star_needles() -> void:
 	var shot_count := 1 + int((needle_level - 1) / 2.0) + (2 if needle_evolved else 0)
 	var targets := _nearest_enemy_indices(shot_count)
 	for enemy_index in targets:
+		if projectiles.size() >= MAX_PLAYER_PROJECTILES:
+			break
 		if enemy_index < 0 or enemy_index >= enemies.size():
 			continue
 		var target_pos: Vector2 = enemies[enemy_index]["pos"]
@@ -1116,7 +1230,7 @@ func _fire_star_needles() -> void:
 			"velocity": direction * (660.0 + needle_level * 25.0 + (120.0 if needle_evolved else 0.0)),
 			"damage": needle_damage * damage_multiplier,
 			"source": "needle",
-			"radius": 8.0 if needle_evolved else 6.0,
+			"radius": (8.0 if needle_evolved else 6.0) * projectile_area_scale,
 			"life": 1.5,
 			"evolved": needle_evolved,
 		})
@@ -1136,20 +1250,31 @@ func _fire_pulse_storm() -> void:
 	for enemy_index in range(enemies.size() - 1, -1, -1):
 		var hit_count := 0
 		for position in strike_positions:
-			if enemies[enemy_index]["pos"].distance_to(position) <= storm_radius + float(enemies[enemy_index]["radius"]):
+			var hit_radius: float = storm_radius + float(enemies[enemy_index]["radius"])
+			if enemies[enemy_index]["pos"].distance_squared_to(position) <= hit_radius * hit_radius:
 				hit_count += 1
 		if hit_count > 0:
 			_damage_enemy(enemy_index, storm_damage * damage_multiplier * hit_count, "storm")
 
 
 func _nearest_enemy_indices(count: int) -> Array:
-	var scored: Array = []
-	for index in enemies.size():
-		scored.append({"index": index, "distance": player_pos.distance_squared_to(enemies[index]["pos"])})
-	scored.sort_custom(func(a, b): return a["distance"] < b["distance"])
+	if count <= 0 or enemies.is_empty():
+		return []
 	var result: Array = []
-	for index in mini(count, scored.size()):
-		result.append(scored[index]["index"])
+	var distances: Array = []
+	for index in enemies.size():
+		var distance: float = player_pos.distance_squared_to(enemies[index]["pos"])
+		var insert_at := distances.size()
+		for distance_index in distances.size():
+			if distance < float(distances[distance_index]):
+				insert_at = distance_index
+				break
+		if insert_at < count:
+			distances.insert(insert_at, distance)
+			result.insert(insert_at, index)
+			if result.size() > count:
+				result.pop_back()
+				distances.pop_back()
 	return result
 
 
@@ -1171,7 +1296,11 @@ func _update_projectiles(delta: float) -> void:
 		var consumed := false
 		for enemy_index in range(enemies.size() - 1, -1, -1):
 			var enemy = enemies[enemy_index]
-			if projectile["pos"].distance_to(enemy["pos"]) <= float(projectile["radius"]) + float(enemy["radius"]):
+			var collision_radius: float = float(projectile["radius"]) + float(enemy["radius"])
+			var offset: Vector2 = projectile["pos"] - enemy["pos"]
+			if absf(offset.x) > collision_radius or absf(offset.y) > collision_radius:
+				continue
+			if offset.length_squared() <= collision_radius * collision_radius:
 				if projectile.get("kind", "") == "fireball":
 					enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), float(projectile.get("burn_time", 0.0)))
 					enemy["burn_tick"] = 0.0
@@ -1250,10 +1379,10 @@ func _update_enemies(delta: float) -> void:
 					_fire_mutant_shot(enemy["pos"], enemy["shot_dir"])
 					enemy["attack_cooldown"] = rng.randf_range(2.1, 2.8)
 			else:
-				var distance_to_player: float = enemy["pos"].distance_to(player_pos)
-				if distance_to_player > 370.0:
+				var distance_squared: float = enemy["pos"].distance_squared_to(player_pos)
+				if distance_squared > 136900.0:
 					enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
-				elif distance_to_player < 245.0:
+				elif distance_squared < 60025.0:
 					enemy["pos"] -= direction * float(enemy["speed"]) * status_speed * delta
 				else:
 					enemy["pos"] += direction.rotated(PI * 0.5) * float(enemy["speed"]) * 0.45 * status_speed * delta
@@ -1280,7 +1409,8 @@ func _update_enemies(delta: float) -> void:
 		else:
 			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 
-		if enemy["pos"].distance_to(player_pos) <= float(enemy["radius"]) + 18.0 and float(enemy["contact_cooldown"]) <= 0.0:
+		var contact_radius: float = float(enemy["radius"]) + 18.0
+		if enemy["pos"].distance_squared_to(player_pos) <= contact_radius * contact_radius and float(enemy["contact_cooldown"]) <= 0.0:
 			var contact_damage := 22.0 if enemy["boss"] else (14.0 if enemy["kind"] == "tank" else (11.0 if enemy["elite"] else 7.0))
 			_take_player_damage(contact_damage)
 			enemy["contact_cooldown"] = 0.75
@@ -1290,6 +1420,8 @@ func _update_enemies(delta: float) -> void:
 func _fire_apostle_burst(origin: Vector2, angle_offset: float = 0.0) -> void:
 	var projectile_count := 12
 	for index in projectile_count:
+		if hostile_projectiles.size() >= MAX_HOSTILE_PROJECTILES:
+			break
 		var angle := TAU * float(index) / float(projectile_count) + angle_offset
 		hostile_projectiles.append({
 			"pos": origin,
@@ -1301,6 +1433,8 @@ func _fire_apostle_burst(origin: Vector2, angle_offset: float = 0.0) -> void:
 
 
 func _fire_mutant_shot(origin: Vector2, locked_direction: Vector2 = Vector2.ZERO) -> void:
+	if hostile_projectiles.size() >= MAX_HOSTILE_PROJECTILES:
+		return
 	var direction := locked_direction.normalized()
 	if direction == Vector2.ZERO:
 		direction = origin.direction_to(player_pos)
@@ -1403,11 +1537,13 @@ func _take_player_damage(amount: float) -> void:
 func _update_gems(delta: float) -> void:
 	for index in range(gems.size() - 1, -1, -1):
 		var gem = gems[index]
-		var distance: float = gem["pos"].distance_to(player_pos)
-		if distance <= pickup_radius * 2.0:
+		var pickup_distance := pickup_radius * 2.0
+		var distance_squared: float = gem["pos"].distance_squared_to(player_pos)
+		if distance_squared <= pickup_distance * pickup_distance:
+			var distance := sqrt(distance_squared)
 			var pull_speed: float = 240.0 + maxf(0.0, pickup_radius * 2.0 - distance) * 3.0
 			gem["pos"] += gem["pos"].direction_to(player_pos) * pull_speed * delta
-		if gem["pos"].distance_to(player_pos) <= 25.0:
+		if gem["pos"].distance_squared_to(player_pos) <= 625.0:
 			_gain_experience(float(gem["value"]))
 			gems.remove_at(index)
 		else:
@@ -1417,11 +1553,13 @@ func _update_gems(delta: float) -> void:
 func _update_repair_cores(delta: float) -> void:
 	for index in range(repair_cores.size() - 1, -1, -1):
 		var core = repair_cores[index]
-		var distance: float = core["pos"].distance_to(player_pos)
-		if distance <= pickup_radius * 1.5:
+		var pickup_distance := pickup_radius * 1.5
+		var distance_squared: float = core["pos"].distance_squared_to(player_pos)
+		if distance_squared <= pickup_distance * pickup_distance:
+			var distance := sqrt(distance_squared)
 			var pull_speed := 210.0 + maxf(0.0, pickup_radius * 1.5 - distance) * 3.2
 			core["pos"] += core["pos"].direction_to(player_pos) * pull_speed * delta
-		if core["pos"].distance_to(player_pos) <= 27.0:
+		if core["pos"].distance_squared_to(player_pos) <= 729.0:
 			var missing_health := maxf(0.0, player_max_health - player_health)
 			var restored := minf(float(core["heal"]), missing_health)
 			player_health += restored
@@ -1556,7 +1694,7 @@ func _available_upgrades() -> Array:
 	if int(meta_levels["cooldown"]) < 5:
 		result.append({"id": "cooldown", "name": "冷卻模組 Lv.%d" % (int(meta_levels["cooldown"]) + 1), "description": "所有自動武器冷卻縮短 6%"})
 	if int(meta_levels["area"]) < 5:
-		result.append({"id": "area", "name": "廣域線圈 Lv.%d" % (int(meta_levels["area"]) + 1), "description": "環域半徑 +12，雷暴半徑 +7"})
+		result.append({"id": "area", "name": "廣域線圈 Lv.%d" % (int(meta_levels["area"]) + 1), "description": "專屬能力範圍 +12，投射物尺寸 +8%，雷暴半徑 +7"})
 	return result
 
 
@@ -1564,9 +1702,9 @@ func _scythe_upgrade_description(next_level: int) -> String:
 	if selected_character == "lucia":
 		match next_level:
 			2: return "火球傷害 +10"
-			3: return "每次額外射出 1 顆火球"
+			3: return "每次增加 2 顆火球，霰彈射程提高"
 			4: return "火球發射間隔縮短 20%"
-			5: return "再增加 1 顆火球，傷害 +14"
+			5: return "再增加 2 顆火球，傷害 +14"
 	if selected_character == "rafari":
 		match next_level:
 			2: return "冰霜傷害 +10"
@@ -1662,6 +1800,7 @@ func _select_upgrade(upgrade_id: String) -> void:
 			meta_levels["area"] = int(meta_levels["area"]) + 1
 			scythe_radius += 12.0
 			storm_radius += 7.0
+			projectile_area_scale *= 1.08
 
 	pending_levels = maxi(0, pending_levels - 1)
 	if pending_levels > 0:
@@ -1682,6 +1821,10 @@ func _update_effects(delta: float) -> void:
 func _enforce_runtime_limits() -> void:
 	if effects.size() > MAX_EFFECTS:
 		effects = effects.slice(effects.size() - MAX_EFFECTS)
+	if projectiles.size() > MAX_PLAYER_PROJECTILES:
+		projectiles = projectiles.slice(projectiles.size() - MAX_PLAYER_PROJECTILES)
+	if hostile_projectiles.size() > MAX_HOSTILE_PROJECTILES:
+		hostile_projectiles = hostile_projectiles.slice(hostile_projectiles.size() - MAX_HOSTILE_PROJECTILES)
 	while gems.size() > MAX_GEMS:
 		var overflow_gem = gems.pop_back()
 		var gem_receiver = gems[gems.size() - 1]
@@ -1695,6 +1838,15 @@ func _enforce_runtime_limits() -> void:
 
 
 func _update_interface(delta: float) -> void:
+	if instruction_time > 0.0:
+		instruction_time -= delta
+		instruction_label.visible = true
+	else:
+		instruction_label.visible = false
+	hud_refresh_timer -= delta
+	if delta > 0.0 and hud_refresh_timer > 0.0:
+		return
+	hud_refresh_timer = 0.1
 	var minutes := int(game_time) / 60
 	var seconds := int(game_time) % 60
 	time_label.text = "%02d:%02d" % [minutes, seconds]
@@ -1738,13 +1890,6 @@ func _update_interface(delta: float) -> void:
 		boss_bar.visible = false
 		boss_label.visible = false
 
-	if instruction_time > 0.0:
-		instruction_time -= delta
-		instruction_label.visible = true
-	else:
-		instruction_label.visible = false
-
-
 func _format_countdown(value: float) -> String:
 	var total := maxi(0, ceili(value))
 	return "%02d:%02d" % [total / 60, total % 60]
@@ -1754,6 +1899,8 @@ func _finish_game(victory: bool) -> void:
 	if game_over:
 		return
 	game_over = true
+	_set_gm_speed(false)
+	gm_panel.visible = false
 	get_tree().paused = true
 	end_overlay.visible = true
 	end_title.text = "使徒討伐完成" if victory else "任務失敗"
@@ -1778,6 +1925,8 @@ func _draw() -> void:
 
 	for gem in gems:
 		var position: Vector2 = gem["pos"]
+		if not _is_world_visible(position, 24.0):
+			continue
 		var size := 7.0 if float(gem["value"]) <= 1.0 else 11.0
 		var points := PackedVector2Array([
 			position + Vector2(0.0, -size),
@@ -1789,12 +1938,16 @@ func _draw() -> void:
 
 	for core in repair_cores:
 		var core_pos: Vector2 = core["pos"]
+		if not _is_world_visible(core_pos, 32.0):
+			continue
 		draw_circle(core_pos, 13.0, Color(0.14, 0.95, 0.62, 0.22))
 		draw_arc(core_pos, 12.0, 0.0, TAU, 24, Color(0.35, 1.0, 0.72), 3.0, true)
 		draw_rect(Rect2(core_pos + Vector2(-3.0, -8.0), Vector2(6.0, 16.0)), Color(0.7, 1.0, 0.86))
 		draw_rect(Rect2(core_pos + Vector2(-8.0, -3.0), Vector2(16.0, 6.0)), Color(0.7, 1.0, 0.86))
 
 	for projectile in projectiles:
+		if not _is_world_visible(projectile["pos"], 48.0):
+			continue
 		var direction: Vector2 = projectile["velocity"].normalized()
 		if projectile.get("kind", "") == "fireball":
 			var fireball_color: Color = projectile.get("color", Color(1.0, 0.42, 0.16))
@@ -1806,16 +1959,28 @@ func _draw() -> void:
 			draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
 
 	for projectile in hostile_projectiles:
+		if not _is_world_visible(projectile["pos"], 48.0):
+			continue
 		draw_circle(projectile["pos"], float(projectile["radius"]), Color(1.0, 0.2, 0.48))
-		draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, 0.0, TAU, 18, Color(1.0, 0.65, 0.8), 2.0, true)
+		if enemies.size() < LOW_DETAIL_ENEMY_COUNT:
+			draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, 0.0, TAU, 18, Color(1.0, 0.65, 0.8), 2.0, true)
 
 	for enemy in enemies:
+		if not _is_world_visible(enemy["pos"], DRAW_MARGIN + float(enemy["radius"])):
+			continue
 		_draw_enemy(enemy)
 
 	for effect in effects:
+		if not _is_world_visible(effect["pos"], float(effect.get("radius", 0.0)) + 48.0):
+			continue
 		_draw_effect(effect)
 
 	_draw_player()
+
+
+func _is_world_visible(position: Vector2, margin: float = DRAW_MARGIN) -> bool:
+	var offset := position - player_pos
+	return absf(offset.x) <= VIEW_SIZE.x * 0.5 + margin and absf(offset.y) <= VIEW_SIZE.y * 0.5 + margin
 
 
 func _draw_background() -> void:
@@ -1849,6 +2014,7 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	var position: Vector2 = enemy["pos"]
 	var radius: float = enemy["radius"]
 	var flash: bool = float(enemy["flash"]) > 0.0
+	var low_detail := enemies.size() >= LOW_DETAIL_ENEMY_COUNT
 	if enemy["boss"]:
 		var boss_color := Color(1.0, 0.24, 0.52) if not flash else Color.WHITE
 		draw_circle(position, radius, Color(boss_color, 0.28))
@@ -1885,6 +2051,10 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		"dasher": base_color = Color(1.0, 0.52, 0.2)
 		"shooter": base_color = Color(0.72, 0.34, 1.0)
 		"tank": base_color = Color(0.9, 0.26, 0.22)
+	if low_detail and float(enemy.get("burn_time", 0.0)) > 0.0:
+		base_color = base_color.lerp(Color(1.0, 0.48, 0.08), 0.48)
+	elif low_detail and float(enemy.get("slow_time", 0.0)) > 0.0:
+		base_color = base_color.lerp(Color(0.35, 0.72, 1.0), 0.52)
 	if flash:
 		base_color = Color.WHITE
 	match enemy["kind"]:
@@ -1892,8 +2062,9 @@ func _draw_enemy(enemy: Dictionary) -> void:
 			if float(enemy.get("dash_charge", 0.0)) > 0.0:
 				var telegraph_alpha := 0.45 + 0.4 * sin(float(enemy["dash_charge"]) * 30.0)
 				var dash_direction: Vector2 = enemy.get("dash_dir", Vector2.RIGHT)
-				draw_line(position, position + dash_direction * 165.0, Color(1.0, 0.42, 0.12, telegraph_alpha), 7.0, true)
-				draw_arc(position, radius + 8.0, 0.0, TAU, 24, Color(1.0, 0.75, 0.2, telegraph_alpha), 4.0, true)
+				draw_line(position, position + dash_direction * (130.0 if low_detail else 165.0), Color(1.0, 0.42, 0.12, telegraph_alpha), 5.0 if low_detail else 7.0, true)
+				if not low_detail:
+					draw_arc(position, radius + 8.0, 0.0, TAU, 24, Color(1.0, 0.75, 0.2, telegraph_alpha), 4.0, true)
 			var dasher_points := PackedVector2Array([
 				position + Vector2(0.0, -radius),
 				position + Vector2(radius, 0.0),
@@ -1905,30 +2076,34 @@ func _draw_enemy(enemy: Dictionary) -> void:
 			if float(enemy.get("shot_charge", 0.0)) > 0.0:
 				var aim_alpha := 0.45 + 0.4 * sin(float(enemy["shot_charge"]) * 28.0)
 				var shot_direction: Vector2 = enemy.get("shot_dir", Vector2.RIGHT)
-				draw_line(position, position + shot_direction * 520.0, Color(0.78, 0.35, 1.0, aim_alpha), 3.0, true)
-				draw_arc(position, radius + 7.0, 0.0, TAU, 22, Color(0.9, 0.62, 1.0, aim_alpha), 3.0, true)
+				draw_line(position, position + shot_direction * (320.0 if low_detail else 520.0), Color(0.78, 0.35, 1.0, aim_alpha), 2.0 if low_detail else 3.0, true)
+				if not low_detail:
+					draw_arc(position, radius + 7.0, 0.0, TAU, 22, Color(0.9, 0.62, 1.0, aim_alpha), 3.0, true)
 			var shooter_points := PackedVector2Array([
 				position + Vector2(0.0, -radius),
 				position + Vector2(radius, radius * 0.82),
 				position + Vector2(-radius, radius * 0.82),
 			])
 			draw_colored_polygon(shooter_points, base_color)
-			draw_circle(position, 4.0, Color(0.08, 0.02, 0.12))
+			if not low_detail:
+				draw_circle(position, 4.0, Color(0.08, 0.02, 0.12))
 		"tank":
 			draw_rect(Rect2(position - Vector2(radius * 0.82, radius * 0.72), Vector2(radius * 1.64, radius * 1.44)), base_color)
-			draw_arc(position, radius, 0.0, TAU, 24, Color(1.0, 0.58, 0.4), 4.0, true)
+			if not low_detail:
+				draw_arc(position, radius, 0.0, TAU, 24, Color(1.0, 0.58, 0.4), 4.0, true)
 		_:
 			draw_circle(position, radius, base_color)
-			draw_circle(position + Vector2(-5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
-			draw_circle(position + Vector2(5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
+			if not low_detail:
+				draw_circle(position + Vector2(-5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
+				draw_circle(position + Vector2(5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
 	if enemy["elite"]:
 		draw_arc(position, radius + 5.0, 0.0, TAU, 24, Color(1.0, 0.86, 0.22), 3.0)
 		var hp_ratio: float = float(enemy["hp"]) / float(enemy["max_hp"])
 		draw_rect(Rect2(position + Vector2(-radius, -radius - 11.0), Vector2(radius * 2.0, 4.0)), Color(0.18, 0.03, 0.08))
 		draw_rect(Rect2(position + Vector2(-radius, -radius - 11.0), Vector2(radius * 2.0 * hp_ratio, 4.0)), Color(1.0, 0.75, 0.22))
-	if float(enemy.get("burn_time", 0.0)) > 0.0:
+	if float(enemy.get("burn_time", 0.0)) > 0.0 and not low_detail:
 		draw_arc(position, radius + 8.0, -1.2, 2.2, 18, Color(1.0, 0.38, 0.08, 0.9), 4.0, true)
-	if float(enemy.get("slow_time", 0.0)) > 0.0:
+	if float(enemy.get("slow_time", 0.0)) > 0.0 and not low_detail:
 		draw_arc(position, radius + 10.0, 0.0, TAU, 24, Color(0.42, 0.82, 1.0, 0.9), 4.0, true)
 
 

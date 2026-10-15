@@ -34,8 +34,8 @@ func _run() -> void:
 		var target_pos: Vector2 = game.enemies[0]["pos"]
 		game._fire_scythe_ring()
 		if character_id == "lucia":
-			if game.projectiles.size() != 1 or game.projectiles[0].get("kind", "") != "fireball" or game.projectiles[0].get("color", Color.BLACK) != game._starter_ring_color():
-				_fail("璐茜婭沒有射出一顆專屬色火球")
+			if game.projectiles.size() != 10 or game.projectiles[0].get("kind", "") != "fireball" or game.projectiles[0].get("color", Color.BLACK) != game._starter_ring_color() or float(game.projectiles[0]["life"]) >= 1.0:
+				_fail("璐茜婭沒有射出 10 發短射程專屬色火球")
 				return
 		else:
 			if game.effects.is_empty() or game.effects[-1]["kind"] != expected_effects[character_id]:
