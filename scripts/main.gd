@@ -10,13 +10,15 @@ const MAX_ENEMIES := 650
 const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EVOLUTION_CORES := 1
+const MAX_WEAPON_SLOTS := 6
+const MAX_PASSIVE_SLOTS := 6
 const MAX_EFFECTS := 220
 const MAX_PLAYER_PROJECTILES := 220
 const MAX_HOSTILE_PROJECTILES := 180
 const LOW_DETAIL_ENEMY_COUNT := 220
 const DRAW_MARGIN := 180.0
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.11.1"
+const VERSION := "Beta0.12.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -81,6 +83,8 @@ var close_damage_multiplier := 1.0
 var burn_duration_multiplier := 1.0
 var slow_effect_multiplier := 1.0
 var projectile_area_scale := 1.0
+var projectile_damage_multiplier := 1.0
+var recovery_per_second := 0.0
 var selected_character := "claire"
 var run_started := false
 var build_open := false
@@ -90,6 +94,9 @@ var damage_by_source := {
 	"starter": 0.0,
 	"needle": 0.0,
 	"storm": 0.0,
+	"drone": 0.0,
+	"gravity": 0.0,
+	"meteor": 0.0,
 	"skill": 0.0,
 	"burn": 0.0,
 	"other": 0.0,
@@ -118,6 +125,8 @@ var meta_levels := {
 	"damage": 0,
 	"cooldown": 0,
 	"area": 0,
+	"recovery": 0,
+	"precision": 0,
 }
 
 var scythe_level := 1
@@ -138,6 +147,23 @@ var storm_damage := 36.0
 var storm_radius := 56.0
 var storm_interval := 2.2
 var storm_timer := 0.7
+
+var drone_level := 0
+var drone_damage := 13.0
+var drone_interval := 0.82
+var drone_timer := 0.45
+
+var gravity_level := 0
+var gravity_damage := 28.0
+var gravity_radius := 82.0
+var gravity_interval := 3.3
+var gravity_timer := 1.1
+
+var meteor_level := 0
+var meteor_damage := 42.0
+var meteor_radius := 70.0
+var meteor_interval := 2.75
+var meteor_timer := 1.35
 
 var enemies: Array = []
 var projectiles: Array = []
@@ -204,6 +230,7 @@ func _process(delta: float) -> void:
 		return
 
 	_update_player(delta)
+	_update_passive_recovery(delta)
 	_update_spawning(delta)
 	_update_weapons(delta)
 	_update_projectiles(delta)
@@ -306,7 +333,7 @@ func _build_interface() -> void:
 	weapon_label.anchor_top = 1.0
 	weapon_label.anchor_bottom = 1.0
 	weapon_label.offset_left = 20.0
-	weapon_label.offset_top = -92.0
+	weapon_label.offset_top = -122.0
 	weapon_label.offset_right = 520.0
 	weapon_label.offset_bottom = -18.0
 	weapon_label.add_theme_font_size_override("font_size", 17)
@@ -750,7 +777,7 @@ func _start_game() -> void:
 	kills = 0
 	total_damage_dealt = 0.0
 	total_damage_taken = 0.0
-	damage_by_source = {"starter": 0.0, "needle": 0.0, "storm": 0.0, "skill": 0.0, "burn": 0.0, "other": 0.0}
+	damage_by_source = {"starter": 0.0, "needle": 0.0, "storm": 0.0, "drone": 0.0, "gravity": 0.0, "meteor": 0.0, "skill": 0.0, "burn": 0.0, "other": 0.0}
 	instruction_time = 10.0
 	wave_index = 0
 	hud_refresh_timer = 0.0
@@ -769,6 +796,8 @@ func _start_game() -> void:
 	burn_duration_multiplier = 1.0
 	slow_effect_multiplier = 1.0
 	projectile_area_scale = 1.0
+	projectile_damage_multiplier = 1.0
+	recovery_per_second = 0.0
 	match selected_character:
 		"epathy":
 			player_armor = 3.0
@@ -781,7 +810,7 @@ func _start_game() -> void:
 	level = 1
 	experience = 0.0
 	experience_required = 12.0
-	meta_levels = {"health": 0, "speed": 0, "pickup": 0, "armor": 0, "damage": 0, "cooldown": 0, "area": 0}
+	meta_levels = {"health": 0, "speed": 0, "pickup": 0, "armor": 0, "damage": 0, "cooldown": 0, "area": 0, "recovery": 0, "precision": 0}
 
 	scythe_level = 1
 	scythe_damage = 24.0
@@ -803,6 +832,20 @@ func _start_game() -> void:
 	storm_radius = 56.0
 	storm_interval = 2.2
 	storm_timer = 0.7
+	drone_level = 0
+	drone_damage = 13.0
+	drone_interval = 0.82
+	drone_timer = 0.45
+	gravity_level = 0
+	gravity_damage = 28.0
+	gravity_radius = 82.0
+	gravity_interval = 3.3
+	gravity_timer = 1.1
+	meteor_level = 0
+	meteor_damage = 42.0
+	meteor_radius = 70.0
+	meteor_interval = 2.75
+	meteor_timer = 1.35
 
 	enemies.clear()
 	projectiles.clear()
@@ -918,13 +961,20 @@ func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
 	var starter_name := _starter_weapon_name()
 	var starter_display := "%s　已進化" % _starter_evolution_name() if scythe_evolved else "%s　Lv.%d / 5" % [starter_name, scythe_level]
-	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5\n\n%s\n進化核心　%d（精英異變體掉落）\n星針進化：星針 Lv.5 ＋ 冷卻模組 Lv.3\n重抽剩餘　%d" % [
+	build_text.text = "%s｜%s\n%s\n\n武器 %d / %d\n• %s\n• 星針　　　%s　　• 脈衝雷暴　%s\n• 守望無人機　%s　　• 重力奇點　%s\n• 隕炎彈　　%s\n\n能力 %d / %d\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5　　• 修復奈米機　Lv.%d / 5\n• 精密核心　Lv.%d / 5\n\n%s\n%s\n進化核心　%d（精英異變體掉落）\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
 		character_data["passive"],
+		_weapon_slot_count(),
+		MAX_WEAPON_SLOTS,
 		starter_display,
 		("未取得" if needle_level == 0 else ("追星蜂群　已進化" if needle_evolved else "Lv.%d / 5" % needle_level)),
 		("未取得" if storm_level == 0 else "Lv.%d / 5" % storm_level),
+		("未取得" if drone_level == 0 else "Lv.%d / 5" % drone_level),
+		("未取得" if gravity_level == 0 else "Lv.%d / 5" % gravity_level),
+		("未取得" if meteor_level == 0 else "Lv.%d / 5" % meteor_level),
+		_passive_slot_count(),
+		MAX_PASSIVE_SLOTS,
 		int(meta_levels["health"]),
 		int(meta_levels["speed"]),
 		int(meta_levels["pickup"]),
@@ -932,7 +982,10 @@ func _update_build_text() -> void:
 		int(meta_levels["damage"]),
 		int(meta_levels["cooldown"]),
 		int(meta_levels["area"]),
+		int(meta_levels["recovery"]),
+		int(meta_levels["precision"]),
 		_starter_evolution_requirement_text(),
+		_needle_evolution_requirement_text(),
 		evolution_cores_owned,
 		rerolls_remaining,
 	]
@@ -948,6 +1001,30 @@ func _starter_weapon_trait_text() -> String:
 
 func _starter_ring_color() -> Color:
 	return CHARACTERS[selected_character]["ring_color"]
+
+
+func _weapon_slot_count() -> int:
+	var count := 1
+	for weapon_level in [needle_level, storm_level, drone_level, gravity_level, meteor_level]:
+		if weapon_level > 0:
+			count += 1
+	return count
+
+
+func _passive_slot_count() -> int:
+	var count := 0
+	for passive_id in meta_levels:
+		if int(meta_levels[passive_id]) > 0:
+			count += 1
+	return count
+
+
+func _can_offer_common_weapon(current_level: int) -> bool:
+	return current_level > 0 or _weapon_slot_count() < MAX_WEAPON_SLOTS
+
+
+func _can_offer_passive(passive_id: String) -> bool:
+	return int(meta_levels[passive_id]) > 0 or _passive_slot_count() < MAX_PASSIVE_SLOTS
 
 
 func _starter_evolution_data() -> Dictionary:
@@ -986,33 +1063,54 @@ func _can_evolve_starter() -> bool:
 	return int(meta_levels[passive_id]) >= 3
 
 
+func _can_evolve_needle() -> bool:
+	return not needle_evolved and needle_level >= 5 and int(meta_levels["cooldown"]) >= 3 and evolution_cores_owned > 0
+
+
+func _needle_evolution_requirement_text() -> String:
+	if needle_evolved:
+		return "共通進化：追星蜂群（完成）"
+	var weapon_state := "完成" if needle_level >= 5 else "%d / 5" % needle_level
+	var passive_state := "完成" if int(meta_levels["cooldown"]) >= 3 else "%d / 3" % int(meta_levels["cooldown"])
+	var core_state := "已有" if evolution_cores_owned > 0 else "尚未取得"
+	return "共通進化：追星蜂群｜星針 Lv.5（%s）＋冷卻模組 Lv.3（%s）＋進化核心（%s）" % [weapon_state, passive_state, core_state]
+
+
 func _try_consume_evolution_core() -> bool:
-	if not _can_evolve_starter():
-		return false
-	evolution_cores_owned -= 1
-	scythe_evolved = true
-	match selected_character:
-		"epathy":
-			scythe_damage += 14.0
-			scythe_radius += 28.0
-			scythe_interval *= 0.88
-		"lucia":
-			scythe_damage += 8.0
-			scythe_radius += 24.0
-			scythe_interval *= 0.86
-		"rafari":
-			scythe_damage += 8.0
-			scythe_radius += 20.0
-			scythe_interval *= 0.88
-		_:
-			scythe_damage += 10.0
-			scythe_radius += 36.0
-			scythe_interval *= 0.82
-			player_max_shield += 12.0
-			player_shield = player_max_shield
-	effects.append({"kind": "evolution", "pos": player_pos, "life": 1.15, "total": 1.15, "radius": scythe_radius, "color": _starter_ring_color()})
-	_show_game_notice("進化完成：%s" % _starter_evolution_name())
-	return true
+	if _can_evolve_starter():
+		evolution_cores_owned -= 1
+		scythe_evolved = true
+		match selected_character:
+			"epathy":
+				scythe_damage += 14.0
+				scythe_radius += 28.0
+				scythe_interval *= 0.88
+			"lucia":
+				scythe_damage += 8.0
+				scythe_radius += 24.0
+				scythe_interval *= 0.86
+			"rafari":
+				scythe_damage += 8.0
+				scythe_radius += 20.0
+				scythe_interval *= 0.88
+			_:
+				scythe_damage += 10.0
+				scythe_radius += 36.0
+				scythe_interval *= 0.82
+				player_max_shield += 12.0
+				player_shield = player_max_shield
+		effects.append({"kind": "evolution", "pos": player_pos, "life": 1.15, "total": 1.15, "radius": scythe_radius, "color": _starter_ring_color()})
+		_show_game_notice("進化完成：%s" % _starter_evolution_name())
+		return true
+	if _can_evolve_needle():
+		evolution_cores_owned -= 1
+		needle_evolved = true
+		needle_damage += 12.0
+		needle_interval *= 0.72
+		effects.append({"kind": "evolution", "pos": player_pos, "life": 1.05, "total": 1.05, "radius": 150.0, "color": Color(0.92, 0.52, 1.0)})
+		_show_game_notice("進化完成：追星蜂群")
+		return true
+	return false
 
 
 func _handle_upgrade_input() -> void:
@@ -1031,6 +1129,12 @@ func _update_player(delta: float) -> void:
 	player_pos += movement * player_speed * delta
 	camera.position = player_pos
 	player_invulnerable = maxf(0.0, player_invulnerable - delta)
+
+
+func _update_passive_recovery(delta: float) -> void:
+	if recovery_per_second <= 0.0 or player_health >= player_max_health:
+		return
+	player_health = minf(player_max_health, player_health + recovery_per_second * delta)
 
 
 func _use_epathy_skill() -> void:
@@ -1079,12 +1183,12 @@ func _use_lucia_skill() -> void:
 			"kind": "fireball",
 			"pos": player_pos,
 			"velocity": direction * speed,
-			"damage": scythe_damage * (0.42 if scythe_evolved else 0.38) * damage_multiplier,
+			"damage": scythe_damage * (0.42 if scythe_evolved else 0.38) * damage_multiplier * projectile_damage_multiplier,
 			"source": "starter",
 			"radius": 8.0 * projectile_area_scale,
 			"life": travel_distance / speed,
 			"burn_time": (2.4 if scythe_evolved else 1.5) * burn_duration_multiplier,
-			"burn_damage": scythe_damage * (0.11 if scythe_evolved else 0.08) * damage_multiplier,
+			"burn_damage": scythe_damage * (0.11 if scythe_evolved else 0.08) * damage_multiplier * projectile_damage_multiplier,
 			"color": _starter_ring_color(),
 			"evolved": scythe_evolved,
 		})
@@ -1289,6 +1393,24 @@ func _update_weapons(delta: float) -> void:
 			_fire_pulse_storm()
 			storm_timer += storm_interval
 
+	if drone_level > 0:
+		drone_timer -= delta
+		if drone_timer <= 0.0:
+			_fire_watch_drone()
+			drone_timer += drone_interval
+
+	if gravity_level > 0:
+		gravity_timer -= delta
+		if gravity_timer <= 0.0:
+			_fire_gravity_singularity()
+			gravity_timer += gravity_interval
+
+	if meteor_level > 0:
+		meteor_timer -= delta
+		if meteor_timer <= 0.0:
+			_fire_meteor_round()
+			meteor_timer += meteor_interval
+
 
 func _fire_scythe_ring() -> void:
 	match selected_character:
@@ -1313,7 +1435,7 @@ func _fire_star_needles() -> void:
 		projectiles.append({
 			"pos": player_pos,
 			"velocity": direction * (660.0 + needle_level * 25.0 + (120.0 if needle_evolved else 0.0)),
-			"damage": needle_damage * damage_multiplier,
+			"damage": needle_damage * damage_multiplier * projectile_damage_multiplier,
 			"source": "needle",
 			"radius": (8.0 if needle_evolved else 6.0) * projectile_area_scale,
 			"life": 1.5,
@@ -1340,6 +1462,79 @@ func _fire_pulse_storm() -> void:
 				hit_count += 1
 		if hit_count > 0:
 			_damage_enemy(enemy_index, storm_damage * damage_multiplier * hit_count, "storm")
+
+
+func _fire_watch_drone() -> void:
+	if enemies.is_empty():
+		return
+	var shot_count := 1 + (1 if drone_level >= 3 else 0) + (1 if drone_level >= 5 else 0)
+	var targets := _nearest_enemy_indices(shot_count)
+	for enemy_index in targets:
+		if projectiles.size() >= MAX_PLAYER_PROJECTILES:
+			break
+		if enemy_index < 0 or enemy_index >= enemies.size():
+			continue
+		var direction := player_pos.direction_to(enemies[enemy_index]["pos"])
+		projectiles.append({
+			"kind": "drone_bolt",
+			"pos": player_pos + direction.rotated(-0.45) * 26.0,
+			"velocity": direction * (720.0 + drone_level * 22.0),
+			"damage": drone_damage * damage_multiplier * projectile_damage_multiplier,
+			"source": "drone",
+			"radius": 5.0 * projectile_area_scale,
+			"life": 1.25,
+		})
+
+
+func _fire_gravity_singularity() -> void:
+	if enemies.is_empty():
+		return
+	var nearest := _nearest_enemy_indices(1)
+	if nearest.is_empty():
+		return
+	var target_index: int = nearest[0]
+	if target_index < 0 or target_index >= enemies.size():
+		return
+	var target_pos: Vector2 = enemies[target_index]["pos"]
+	var radius := gravity_radius
+	for enemy_index in range(enemies.size() - 1, -1, -1):
+		var enemy = enemies[enemy_index]
+		var hit_radius: float = radius + float(enemy["radius"])
+		if target_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
+			continue
+		var pull_distance := 8.0 if enemy["boss"] else 22.0 + gravity_level * 3.0
+		enemy["pos"] += enemy["pos"].direction_to(target_pos) * pull_distance
+		enemies[enemy_index] = enemy
+		_damage_enemy(enemy_index, gravity_damage * damage_multiplier, "gravity")
+	effects.append({"kind": "gravity", "pos": target_pos, "life": 0.85, "total": 0.85, "radius": radius})
+
+
+func _fire_meteor_round() -> void:
+	if enemies.is_empty():
+		return
+	var strike_count := 1 + (1 if meteor_level >= 3 else 0) + (1 if meteor_level >= 5 else 0)
+	var targets := _nearest_enemy_indices(strike_count)
+	var strike_positions: Array = []
+	for enemy_index in targets:
+		if enemy_index >= 0 and enemy_index < enemies.size():
+			strike_positions.append(enemies[enemy_index]["pos"])
+	for enemy_index in range(enemies.size() - 1, -1, -1):
+		var enemy = enemies[enemy_index]
+		var inside_blast := false
+		for position in strike_positions:
+			var hit_radius: float = meteor_radius + float(enemy["radius"])
+			if enemy["pos"].distance_squared_to(position) <= hit_radius * hit_radius:
+				inside_blast = true
+				break
+		if not inside_blast:
+			continue
+		enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), (1.5 + meteor_level * 0.18) * burn_duration_multiplier)
+		enemy["burn_tick"] = 0.0
+		enemy["burn_damage"] = maxf(float(enemy.get("burn_damage", 0.0)), meteor_damage * 0.1 * damage_multiplier)
+		enemies[enemy_index] = enemy
+		_damage_enemy(enemy_index, meteor_damage * damage_multiplier, "meteor")
+	for position in strike_positions:
+		effects.append({"kind": "meteor", "pos": position, "life": 0.68, "total": 0.68, "radius": meteor_radius})
 
 
 func _nearest_enemy_indices(count: int) -> Array:
@@ -1604,7 +1799,7 @@ func _drop_repair_core(position: Vector2) -> void:
 
 
 func _drop_evolution_core(position: Vector2) -> void:
-	if scythe_evolved or evolution_cores_owned > 0:
+	if (scythe_evolved and needle_evolved) or evolution_cores_owned > 0:
 		return
 	if evolution_cores.size() >= MAX_EVOLUTION_CORES:
 		return
@@ -1751,7 +1946,7 @@ func _pick_upgrade_choices(candidates: Array) -> Array:
 
 
 func _is_weapon_upgrade(upgrade_id: String) -> bool:
-	return upgrade_id in ["scythe", "needle", "needle_evolution", "storm"]
+	return upgrade_id in ["scythe", "needle", "storm", "drone", "gravity", "meteor"]
 
 
 func _reroll_upgrades() -> void:
@@ -1769,38 +1964,42 @@ func _available_upgrades() -> Array:
 			"name": "%s Lv.%d" % [_starter_weapon_name(), scythe_level + 1],
 			"description": _scythe_upgrade_description(scythe_level + 1),
 		})
-	if needle_level < 5:
+	if needle_level < 5 and _can_offer_common_weapon(needle_level):
 		result.append({
 			"id": "needle",
 			"name": "星針 Lv.%d" % (needle_level + 1),
 			"description": _needle_upgrade_description(needle_level + 1),
 		})
-	elif int(meta_levels["cooldown"]) >= 3 and not needle_evolved:
-		result.append({
-			"id": "needle_evolution",
-			"name": "進化：追星蜂群",
-			"description": "星針 Lv.5 ＋ 冷卻模組 Lv.3\n增加 2 枚星針，並提高傷害、射速與飛行速度",
-		})
-	if storm_level < 5:
+	if storm_level < 5 and _can_offer_common_weapon(storm_level):
 		result.append({
 			"id": "storm",
 			"name": "脈衝雷暴 Lv.%d" % (storm_level + 1),
 			"description": _storm_upgrade_description(storm_level + 1),
 		})
-	if int(meta_levels["health"]) < 5:
+	if drone_level < 5 and _can_offer_common_weapon(drone_level):
+		result.append({"id": "drone", "name": "守望無人機 Lv.%d" % (drone_level + 1), "description": _drone_upgrade_description(drone_level + 1)})
+	if gravity_level < 5 and _can_offer_common_weapon(gravity_level):
+		result.append({"id": "gravity", "name": "重力奇點 Lv.%d" % (gravity_level + 1), "description": _gravity_upgrade_description(gravity_level + 1)})
+	if meteor_level < 5 and _can_offer_common_weapon(meteor_level):
+		result.append({"id": "meteor", "name": "隕炎彈 Lv.%d" % (meteor_level + 1), "description": _meteor_upgrade_description(meteor_level + 1)})
+	if int(meta_levels["health"]) < 5 and _can_offer_passive("health"):
 		result.append({"id": "health", "name": "強化生命 Lv.%d" % (int(meta_levels["health"]) + 1), "description": "最大生命 +15，並回復 15 生命"})
-	if int(meta_levels["speed"]) < 5:
+	if int(meta_levels["speed"]) < 5 and _can_offer_passive("speed"):
 		result.append({"id": "speed", "name": "高速模組 Lv.%d" % (int(meta_levels["speed"]) + 1), "description": "移動速度提高 8%"})
-	if int(meta_levels["pickup"]) < 5:
+	if int(meta_levels["pickup"]) < 5 and _can_offer_passive("pickup"):
 		result.append({"id": "pickup", "name": "回收磁場 Lv.%d" % (int(meta_levels["pickup"]) + 1), "description": "星源碎片拾取範圍 +25"})
-	if int(meta_levels["armor"]) < 5:
+	if int(meta_levels["armor"]) < 5 and _can_offer_passive("armor"):
 		result.append({"id": "armor", "name": "強化裝甲 Lv.%d" % (int(meta_levels["armor"]) + 1), "description": "護甲 +1，降低每次受到的傷害"})
-	if int(meta_levels["damage"]) < 5:
+	if int(meta_levels["damage"]) < 5 and _can_offer_passive("damage"):
 		result.append({"id": "damage", "name": "星源增幅 Lv.%d" % (int(meta_levels["damage"]) + 1), "description": "所有武器傷害提高 12%"})
-	if int(meta_levels["cooldown"]) < 5:
+	if int(meta_levels["cooldown"]) < 5 and _can_offer_passive("cooldown"):
 		result.append({"id": "cooldown", "name": "冷卻模組 Lv.%d" % (int(meta_levels["cooldown"]) + 1), "description": "所有自動武器冷卻縮短 6%"})
-	if int(meta_levels["area"]) < 5:
-		result.append({"id": "area", "name": "廣域線圈 Lv.%d" % (int(meta_levels["area"]) + 1), "description": "專屬能力範圍 +12，投射物尺寸 +8%，雷暴半徑 +7"})
+	if int(meta_levels["area"]) < 5 and _can_offer_passive("area"):
+		result.append({"id": "area", "name": "廣域線圈 Lv.%d" % (int(meta_levels["area"]) + 1), "description": "能力與範圍武器擴大，投射物尺寸 +8%"})
+	if int(meta_levels["recovery"]) < 5 and _can_offer_passive("recovery"):
+		result.append({"id": "recovery", "name": "修復奈米機 Lv.%d" % (int(meta_levels["recovery"]) + 1), "description": "每秒回復 0.4 生命"})
+	if int(meta_levels["precision"]) < 5 and _can_offer_passive("precision"):
+		result.append({"id": "precision", "name": "精密核心 Lv.%d" % (int(meta_levels["precision"]) + 1), "description": "火球、星針與無人機光彈傷害提高 12%"})
 	return result
 
 
@@ -1845,6 +2044,36 @@ func _storm_upgrade_description(next_level: int) -> String:
 	return "強化脈衝雷暴"
 
 
+func _drone_upgrade_description(next_level: int) -> String:
+	match next_level:
+		1: return "取得武器：無人機高速射擊最近異變體"
+		2: return "射擊傷害 +7"
+		3: return "每輪額外發射 1 枚光彈"
+		4: return "射擊間隔縮短 20%"
+		5: return "再增加 1 枚光彈，傷害 +7"
+	return "強化守望無人機"
+
+
+func _gravity_upgrade_description(next_level: int) -> String:
+	match next_level:
+		1: return "取得武器：在敵人腳下生成牽引奇點"
+		2: return "奇點傷害 +12"
+		3: return "牽引與傷害範圍 +22"
+		4: return "生成間隔縮短 22%"
+		5: return "牽引力提高，傷害 +16"
+	return "強化重力奇點"
+
+
+func _meteor_upgrade_description(next_level: int) -> String:
+	match next_level:
+		1: return "取得武器：轟擊敵人並留下燃燒"
+		2: return "爆炸傷害 +16"
+		3: return "每輪額外轟擊 1 個目標"
+		4: return "發射間隔縮短 22%"
+		5: return "再增加 1 個目標，爆炸範圍 +20"
+	return "強化隕炎彈"
+
+
 func _select_upgrade(upgrade_id: String) -> void:
 	match upgrade_id:
 		"scythe":
@@ -1863,17 +2092,31 @@ func _select_upgrade(upgrade_id: String) -> void:
 				2: needle_damage += 8.0
 				4: needle_interval *= 0.8
 				5: needle_damage += 8.0
-		"needle_evolution":
-			if needle_level >= 5 and int(meta_levels["cooldown"]) >= 3 and not needle_evolved:
-				needle_evolved = true
-				needle_damage += 12.0
-				needle_interval *= 0.72
 		"storm":
 			storm_level += 1
 			match storm_level:
 				2: storm_damage += 16.0
 				4: storm_interval *= 0.75
 				5: storm_radius += 24.0
+		"drone":
+			drone_level += 1
+			match drone_level:
+				2: drone_damage += 7.0
+				4: drone_interval *= 0.8
+				5: drone_damage += 7.0
+		"gravity":
+			gravity_level += 1
+			match gravity_level:
+				2: gravity_damage += 12.0
+				3: gravity_radius += 22.0
+				4: gravity_interval *= 0.78
+				5: gravity_damage += 16.0
+		"meteor":
+			meteor_level += 1
+			match meteor_level:
+				2: meteor_damage += 16.0
+				4: meteor_interval *= 0.78
+				5: meteor_radius += 20.0
 		"health":
 			meta_levels["health"] = int(meta_levels["health"]) + 1
 			player_max_health += 15.0
@@ -1895,11 +2138,23 @@ func _select_upgrade(upgrade_id: String) -> void:
 			scythe_interval *= 0.94
 			needle_interval *= 0.94
 			storm_interval *= 0.94
+			drone_interval *= 0.94
+			gravity_interval *= 0.94
+			meteor_interval *= 0.94
 		"area":
 			meta_levels["area"] = int(meta_levels["area"]) + 1
 			scythe_radius += 12.0
 			storm_radius += 7.0
+			gravity_radius += 8.0
+			meteor_radius += 8.0
 			projectile_area_scale *= 1.08
+		"recovery":
+			meta_levels["recovery"] = int(meta_levels["recovery"]) + 1
+			recovery_per_second += 0.4
+			player_health = minf(player_max_health, player_health + 5.0)
+		"precision":
+			meta_levels["precision"] = int(meta_levels["precision"]) + 1
+			projectile_damage_multiplier *= 1.12
 
 	_try_consume_evolution_core()
 
@@ -1973,10 +2228,13 @@ func _update_interface(delta: float) -> void:
 		next_wave_text,
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
-	weapon_label.text = "%s\n星針 %s｜脈衝雷暴 %s" % [
+	weapon_label.text = "%s\n星針 %s｜雷暴 %s\n無人機 %s｜奇點 %s｜隕炎 %s" % [
 		("%s｜進化" % _starter_evolution_name() if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜待核心" if scythe_level >= 5 else "")]),
 		("未取得" if needle_level == 0 else ("追星蜂群｜進化" if needle_evolved else "Lv.%d" % needle_level)),
 		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
+		("未取得" if drone_level == 0 else "Lv.%d" % drone_level),
+		("未取得" if gravity_level == 0 else "Lv.%d" % gravity_level),
+		("未取得" if meteor_level == 0 else "Lv.%d" % meteor_level),
 	]
 	var skill_name: String = _starter_evolution_name() if scythe_evolved else CHARACTERS[selected_character]["skill_name"]
 	skill_label.text = "自動能力｜%s\n每 %.1f 秒發動" % [skill_name, scythe_interval]
@@ -2008,7 +2266,7 @@ func _finish_game(victory: bool) -> void:
 	end_overlay.visible = true
 	end_title.text = "使徒討伐完成" if victory else "任務失敗"
 	end_title.modulate = Color(0.45, 0.95, 1.0) if victory else Color(1.0, 0.4, 0.48)
-	end_summary.text = "生存時間　%s\n擊殺數　%d　最終等級　%d\n造成傷害　%d　承受傷害　%d\n\n傷害分布\n%s　%d｜星針　%d｜脈衝雷暴　%d\n燃燒　%d\n\n%s" % [
+	end_summary.text = "生存時間　%s\n擊殺數　%d　最終等級　%d\n造成傷害　%d　承受傷害　%d\n\n傷害分布\n%s　%d｜星針　%d｜脈衝雷暴　%d\n守望無人機　%d｜重力奇點　%d｜隕炎彈　%d｜燃燒　%d\n\n%s" % [
 		_format_countdown(game_time),
 		kills,
 		level,
@@ -2018,6 +2276,9 @@ func _finish_game(victory: bool) -> void:
 		int(damage_by_source["starter"]),
 		int(damage_by_source["needle"]),
 		int(damage_by_source["storm"]),
+		int(damage_by_source["drone"]),
+		int(damage_by_source["gravity"]),
+		int(damage_by_source["meteor"]),
 		int(damage_by_source["burn"]),
 		("方舟防線暫時安全。" if victory else "重新調整強化後再次出擊。"),
 	]
@@ -2069,6 +2330,9 @@ func _draw() -> void:
 			draw_line(projectile["pos"] - direction * 18.0, projectile["pos"], Color(fireball_color, 0.48), 8.0, true)
 			draw_circle(projectile["pos"], float(projectile["radius"]), fireball_color)
 			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.46, fireball_color.lightened(0.55))
+		elif projectile.get("kind", "") == "drone_bolt":
+			draw_line(projectile["pos"] - direction * 15.0, projectile["pos"] + direction * 5.0, Color(1.0, 0.83, 0.26), 5.0, true)
+			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.72, Color(1.0, 0.97, 0.72))
 		else:
 			var projectile_color := Color(0.95, 0.62, 1.0) if projectile.get("evolved", false) else Color(0.5, 0.95, 1.0)
 			draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
@@ -2267,6 +2531,16 @@ func _draw_effect(effect: Dictionary) -> void:
 			var strike_top: Vector2 = effect["pos"] + Vector2(0.0, -220.0)
 			draw_line(strike_top, effect["pos"], Color(0.72, 0.92, 1.0, alpha), 9.0, true)
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.55 + progress * 0.45), 0.0, TAU, 36, Color(0.35, 0.78, 1.0, alpha), 7.0, true)
+		"gravity":
+			var gravity_radius_now := float(effect["radius"]) * (0.35 + progress * 0.65)
+			draw_circle(effect["pos"], gravity_radius_now, Color(0.45, 0.18, 0.78, alpha * 0.12))
+			draw_arc(effect["pos"], gravity_radius_now, progress * 2.0, TAU + progress * 2.0, 52, Color(0.72, 0.38, 1.0, alpha), 8.0, true)
+			draw_circle(effect["pos"], maxf(4.0, 16.0 * (1.0 - progress)), Color(0.06, 0.01, 0.12, alpha))
+		"meteor":
+			var meteor_radius_now := float(effect["radius"]) * progress
+			draw_line(effect["pos"] + Vector2(90.0, -210.0) * (1.0 - progress), effect["pos"], Color(1.0, 0.55, 0.15, alpha), 12.0, true)
+			draw_circle(effect["pos"], meteor_radius_now, Color(1.0, 0.3, 0.08, alpha * 0.18))
+			draw_arc(effect["pos"], meteor_radius_now, 0.0, TAU, 48, Color(1.0, 0.62, 0.18, alpha), 8.0, true)
 
 
 func _draw_player() -> void:
@@ -2279,6 +2553,11 @@ func _draw_player() -> void:
 	if player_shield > 0.0:
 		var shield_alpha := 0.22 + 0.38 * (player_shield / player_max_shield)
 		draw_arc(player_pos, 30.0, 0.0, TAU, 36, Color(0.3, 0.78, 1.0, shield_alpha), 3.0, true)
+	if drone_level > 0:
+		var drone_pos := player_pos + Vector2.from_angle(game_time * 2.2) * 42.0
+		draw_line(player_pos, drone_pos, Color(1.0, 0.78, 0.2, 0.2), 2.0, true)
+		draw_circle(drone_pos, 8.0, Color(1.0, 0.76, 0.22))
+		draw_circle(drone_pos, 3.0, Color(1.0, 1.0, 0.78))
 	if scythe_timer < 0.22:
 		var preview_color := Color(_starter_ring_color(), 0.18)
 		match selected_character:

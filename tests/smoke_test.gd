@@ -308,20 +308,15 @@ func _run() -> void:
 		return
 	game.needle_level = 5
 	game.meta_levels["cooldown"] = 3
-	var needle_evolution_found := false
 	for option in game._available_upgrades():
 		if option["id"] == "needle_evolution":
-			needle_evolution_found = true
-			break
-	if not needle_evolution_found:
-		_fail("星針達成條件後沒有出現追星蜂群進化")
-		return
+			_fail("追星蜂群不應混入一般升級三選一")
+			return
 	var old_needle_damage: float = game.needle_damage
 	var old_needle_interval: float = game.needle_interval
-	game.pending_levels = 1
-	game._select_upgrade("needle_evolution")
-	if not game.needle_evolved or game.needle_damage <= old_needle_damage or game.needle_interval >= old_needle_interval:
-		_fail("追星蜂群進化沒有正確提高傷害與射速")
+	game.evolution_cores_owned = 1
+	if not game._try_consume_evolution_core() or not game.needle_evolved or game.needle_damage <= old_needle_damage or game.needle_interval >= old_needle_interval:
+		_fail("追星蜂群沒有透過進化核心提高傷害與射速")
 		return
 	game.enemies.clear()
 	for target_index in 5:
