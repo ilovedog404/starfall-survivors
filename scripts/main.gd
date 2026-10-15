@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.9.2"
+const VERSION := "Beta0.10.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -129,6 +129,7 @@ var needle_level := 0
 var needle_damage := 17.0
 var needle_interval := 0.72
 var needle_timer := 0.2
+var needle_evolved := false
 
 var storm_level := 0
 var storm_damage := 36.0
@@ -739,6 +740,7 @@ func _start_game() -> void:
 	needle_damage = 17.0
 	needle_interval = 0.72
 	needle_timer = 0.2
+	needle_evolved = false
 	storm_level = 0
 	storm_damage = 36.0
 	storm_radius = 56.0
@@ -813,12 +815,12 @@ func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
 	var starter_name := _starter_weapon_name()
 	var evolution_text := "進化條件：星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3" if selected_character == "claire" else "專屬環域：%s" % _starter_weapon_trait_text()
-	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5\n\n%s\n重抽剩餘　%d" % [
+	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5\n\n%s\n星針進化：星針 Lv.5 ＋ 冷卻模組 Lv.3\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
 		character_data["passive"],
 		("崩星護界　已進化" if scythe_evolved else "%s　Lv.%d / 5" % [starter_name, scythe_level]),
-		("未取得" if needle_level == 0 else "Lv.%d / 5" % needle_level),
+		("未取得" if needle_level == 0 else ("追星蜂群　已進化" if needle_evolved else "Lv.%d / 5" % needle_level)),
 		("未取得" if storm_level == 0 else "Lv.%d / 5" % storm_level),
 		int(meta_levels["health"]),
 		int(meta_levels["speed"]),
@@ -1120,7 +1122,7 @@ func _fire_scythe_ring() -> void:
 func _fire_star_needles() -> void:
 	if enemies.is_empty():
 		return
-	var shot_count := 1 + int((needle_level - 1) / 2.0)
+	var shot_count := 1 + int((needle_level - 1) / 2.0) + (2 if needle_evolved else 0)
 	var targets := _nearest_enemy_indices(shot_count)
 	for enemy_index in targets:
 		if enemy_index < 0 or enemy_index >= enemies.size():
@@ -1129,11 +1131,12 @@ func _fire_star_needles() -> void:
 		var direction := player_pos.direction_to(target_pos)
 		projectiles.append({
 			"pos": player_pos,
-			"velocity": direction * (660.0 + needle_level * 25.0),
+			"velocity": direction * (660.0 + needle_level * 25.0 + (120.0 if needle_evolved else 0.0)),
 			"damage": needle_damage * damage_multiplier,
 			"source": "needle",
-			"radius": 6.0,
+			"radius": 8.0 if needle_evolved else 6.0,
 			"life": 1.5,
+			"evolved": needle_evolved,
 		})
 
 
@@ -1456,7 +1459,7 @@ func _show_upgrade_choices() -> void:
 		current_upgrade_choices.append(option)
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(285.0, 205.0)
-		var category := "進化" if option["id"] == "scythe_evolution" else ("武器" if _is_weapon_upgrade(option["id"]) else "能力")
+		var category := "進化" if String(option["id"]).ends_with("_evolution") else ("武器" if _is_weapon_upgrade(option["id"]) else "能力")
 		button.text = "[%d]【%s】%s\n\n%s" % [index + 1, category, option["name"], option["description"]]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_theme_font_size_override("font_size", 19)
@@ -1492,7 +1495,7 @@ func _pick_upgrade_choices(candidates: Array) -> Array:
 
 
 func _is_weapon_upgrade(upgrade_id: String) -> bool:
-	return upgrade_id in ["scythe", "scythe_evolution", "needle", "storm"]
+	return upgrade_id in ["scythe", "scythe_evolution", "needle", "needle_evolution", "storm"]
 
 
 func _reroll_upgrades() -> void:
@@ -1521,6 +1524,12 @@ func _available_upgrades() -> Array:
 			"id": "needle",
 			"name": "星針 Lv.%d" % (needle_level + 1),
 			"description": _needle_upgrade_description(needle_level + 1),
+		})
+	elif int(meta_levels["cooldown"]) >= 3 and not needle_evolved:
+		result.append({
+			"id": "needle_evolution",
+			"name": "進化：追星蜂群",
+			"description": "星針 Lv.5 ＋ 冷卻模組 Lv.3\n增加 2 枚星針，並提高傷害、射速與飛行速度",
 		})
 	if storm_level < 5:
 		result.append({
@@ -1598,6 +1607,11 @@ func _select_upgrade(upgrade_id: String) -> void:
 				2: needle_damage += 8.0
 				4: needle_interval *= 0.8
 				5: needle_damage += 8.0
+		"needle_evolution":
+			if needle_level >= 5 and int(meta_levels["cooldown"]) >= 3 and not needle_evolved:
+				needle_evolved = true
+				needle_damage += 12.0
+				needle_interval *= 0.72
 		"storm":
 			storm_level += 1
 			match storm_level:
@@ -1688,7 +1702,7 @@ func _update_interface(delta: float) -> void:
 	]
 	weapon_label.text = "%s\n星針 %s｜脈衝雷暴 %s" % [
 		("崩星護界｜進化" if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜超載" if scythe_level >= 5 else "")]),
-		("未取得" if needle_level == 0 else "Lv.%d" % needle_level),
+		("未取得" if needle_level == 0 else ("追星蜂群｜進化" if needle_evolved else "Lv.%d" % needle_level)),
 		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
 	]
 	var skill_name: String = CHARACTERS[selected_character]["skill_name"]
@@ -1768,7 +1782,8 @@ func _draw() -> void:
 
 	for projectile in projectiles:
 		var direction: Vector2 = projectile["velocity"].normalized()
-		draw_line(projectile["pos"] - direction * 10.0, projectile["pos"] + direction * 7.0, Color(0.5, 0.95, 1.0), 5.0, true)
+		var projectile_color := Color(0.95, 0.62, 1.0) if projectile.get("evolved", false) else Color(0.5, 0.95, 1.0)
+		draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
 
 	for projectile in hostile_projectiles:
 		draw_circle(projectile["pos"], float(projectile["radius"]), Color(1.0, 0.2, 0.48))

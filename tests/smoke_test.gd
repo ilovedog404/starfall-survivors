@@ -262,6 +262,34 @@ func _run() -> void:
 	if game.scythe_radius <= old_scythe_radius_for_area or game.storm_radius <= old_storm_radius_for_area:
 		_fail("廣域線圈沒有提高環域或雷暴範圍")
 		return
+	game.needle_level = 5
+	game.meta_levels["cooldown"] = 3
+	var needle_evolution_found := false
+	for option in game._available_upgrades():
+		if option["id"] == "needle_evolution":
+			needle_evolution_found = true
+			break
+	if not needle_evolution_found:
+		_fail("星針達成條件後沒有出現追星蜂群進化")
+		return
+	var old_needle_damage: float = game.needle_damage
+	var old_needle_interval: float = game.needle_interval
+	game.pending_levels = 1
+	game._select_upgrade("needle_evolution")
+	if not game.needle_evolved or game.needle_damage <= old_needle_damage or game.needle_interval >= old_needle_interval:
+		_fail("追星蜂群進化沒有正確提高傷害與射速")
+		return
+	game.enemies.clear()
+	for target_index in 5:
+		game._spawn_mutant("chaser")
+		game.enemies[-1]["pos"] = game.player_pos + Vector2(120.0 + target_index * 8.0, target_index * 15.0)
+	game.projectiles.clear()
+	game._fire_star_needles()
+	if game.projectiles.size() < 5 or not game.projectiles[0].get("evolved", false):
+		_fail("追星蜂群沒有發射五枚進化星針")
+		return
+	game.enemies.clear()
+	game.projectiles.clear()
 	game.scythe_level = 5
 	game.meta_levels["armor"] = 3
 	for option in game._available_upgrades():
@@ -313,7 +341,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
