@@ -215,10 +215,32 @@ func _run() -> void:
 	if not game.choosing_upgrade or not game.upgrade_overlay.visible:
 		_fail("升級三選一沒有開啟")
 		return
+	var choice_has_weapon := false
+	var choice_has_ability := false
+	for option in game.current_upgrade_choices:
+		if game._is_weapon_upgrade(option["id"]):
+			choice_has_weapon = true
+		else:
+			choice_has_ability = true
+	if not choice_has_weapon or not choice_has_ability:
+		_fail("升級三選一沒有同時提供武器與能力")
+		return
+	for button in game.upgrade_buttons.get_children():
+		if not ("【武器】" in button.text or "【能力】" in button.text or "【進化】" in button.text):
+			_fail("升級卡片沒有顯示分類")
+			return
 	var rerolls_before: int = game.rerolls_remaining
 	game._reroll_upgrades()
 	if game.rerolls_remaining != rerolls_before - 1 or game.current_upgrade_choices.size() != 3:
 		_fail("升級重抽沒有正確更新選項")
+		return
+	choice_has_weapon = false
+	choice_has_ability = false
+	for option in game.current_upgrade_choices:
+		if game._is_weapon_upgrade(option["id"]): choice_has_weapon = true
+		else: choice_has_ability = true
+	if not choice_has_weapon or not choice_has_ability:
+		_fail("重新抽取後沒有維持武器與能力保證")
 		return
 	game._select_upgrade("needle")
 	while game.pending_levels > 0:
@@ -291,7 +313,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

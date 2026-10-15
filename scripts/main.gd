@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.9.1"
+const VERSION := "Beta0.9.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -1448,8 +1448,7 @@ func _show_upgrade_choices() -> void:
 		upgrade_buttons.remove_child(child)
 		child.queue_free()
 
-	var candidates := _available_upgrades()
-	candidates.shuffle()
+	var candidates := _pick_upgrade_choices(_available_upgrades())
 	var option_count := mini(3, candidates.size())
 	current_upgrade_choices.clear()
 	for index in option_count:
@@ -1457,7 +1456,8 @@ func _show_upgrade_choices() -> void:
 		current_upgrade_choices.append(option)
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(285.0, 205.0)
-		button.text = "[%d] %s\n\n%s" % [index + 1, option["name"], option["description"]]
+		var category := "進化" if option["id"] == "scythe_evolution" else ("武器" if _is_weapon_upgrade(option["id"]) else "能力")
+		button.text = "[%d]【%s】%s\n\n%s" % [index + 1, category, option["name"], option["description"]]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_theme_font_size_override("font_size", 19)
 		button.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -1465,6 +1465,34 @@ func _show_upgrade_choices() -> void:
 		upgrade_buttons.add_child(button)
 	reroll_button.text = "[R] 重新抽取（剩餘 %d 次）" % rerolls_remaining
 	reroll_button.disabled = rerolls_remaining <= 0
+
+
+func _pick_upgrade_choices(candidates: Array) -> Array:
+	var weapons: Array = []
+	var abilities: Array = []
+	for option in candidates:
+		if _is_weapon_upgrade(option["id"]):
+			weapons.append(option)
+		else:
+			abilities.append(option)
+	weapons.shuffle()
+	abilities.shuffle()
+
+	var result: Array = []
+	if not weapons.is_empty():
+		result.append(weapons.pop_back())
+	if not abilities.is_empty():
+		result.append(abilities.pop_back())
+	var remaining := weapons + abilities
+	remaining.shuffle()
+	while result.size() < 3 and not remaining.is_empty():
+		result.append(remaining.pop_back())
+	result.shuffle()
+	return result
+
+
+func _is_weapon_upgrade(upgrade_id: String) -> bool:
+	return upgrade_id in ["scythe", "scythe_evolution", "needle", "storm"]
 
 
 func _reroll_upgrades() -> void:
