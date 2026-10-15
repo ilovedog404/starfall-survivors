@@ -103,8 +103,12 @@ func _run() -> void:
 	game.enemies[0]["pos"] = game.player_pos + Vector2(300.0, 0.0)
 	game.enemies[0]["attack_cooldown"] = 0.0
 	game._update_enemies(0.1)
+	if float(game.enemies[0]["shot_charge"]) <= 0.0 or game.enemies[0]["shot_dir"] == Vector2.ZERO:
+		_fail("遠程型異變體沒有進入射擊預警")
+		return
+	game._update_enemies(0.6)
 	if game.hostile_projectiles.is_empty():
-		_fail("遠程型異變體沒有發射彈體")
+		_fail("遠程型異變體預警後沒有發射彈體")
 		return
 	game.enemies.clear()
 	game.hostile_projectiles.clear()
@@ -249,7 +253,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

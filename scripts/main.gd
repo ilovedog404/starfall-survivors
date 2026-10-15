@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.7.1"
+const VERSION := "Beta0.7.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -1008,6 +1008,8 @@ func _spawn_mutant(force_kind: String = "") -> void:
 		"dash_dir": Vector2.ZERO,
 		"contact_cooldown": 0.0,
 		"attack_cooldown": rng.randf_range(0.5, 2.2),
+		"shot_charge": 0.0,
+		"shot_dir": Vector2.ZERO,
 		"flash": 0.0,
 		"burn_time": 0.0,
 		"burn_tick": 0.0,
@@ -1037,6 +1039,8 @@ func _spawn_apostle() -> void:
 		"dash_dir": Vector2.ZERO,
 		"contact_cooldown": 0.0,
 		"attack_cooldown": 1.8,
+		"shot_charge": 0.0,
+		"shot_dir": Vector2.ZERO,
 		"summon_cooldown": 6.0,
 		"flash": 0.0,
 		"burn_time": 0.0,
@@ -1224,17 +1228,24 @@ func _update_enemies(delta: float) -> void:
 					_spawn_mutant("chaser" if summon_index % 2 == 0 else "dasher")
 				enemy["summon_cooldown"] = 7.0
 		elif enemy["kind"] == "shooter":
-			var distance_to_player: float = enemy["pos"].distance_to(player_pos)
-			if distance_to_player > 370.0:
-				enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
-			elif distance_to_player < 245.0:
-				enemy["pos"] -= direction * float(enemy["speed"]) * status_speed * delta
+			if float(enemy.get("shot_charge", 0.0)) > 0.0:
+				enemy["shot_charge"] = float(enemy["shot_charge"]) - delta
+				if float(enemy["shot_charge"]) <= 0.0:
+					enemy["shot_charge"] = 0.0
+					_fire_mutant_shot(enemy["pos"], enemy["shot_dir"])
+					enemy["attack_cooldown"] = rng.randf_range(2.1, 2.8)
 			else:
-				enemy["pos"] += direction.rotated(PI * 0.5) * float(enemy["speed"]) * 0.45 * status_speed * delta
-			enemy["attack_cooldown"] = float(enemy["attack_cooldown"]) - delta
-			if float(enemy["attack_cooldown"]) <= 0.0 and status_speed > 0.0:
-				_fire_mutant_shot(enemy["pos"])
-				enemy["attack_cooldown"] = rng.randf_range(2.1, 2.8)
+				var distance_to_player: float = enemy["pos"].distance_to(player_pos)
+				if distance_to_player > 370.0:
+					enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
+				elif distance_to_player < 245.0:
+					enemy["pos"] -= direction * float(enemy["speed"]) * status_speed * delta
+				else:
+					enemy["pos"] += direction.rotated(PI * 0.5) * float(enemy["speed"]) * 0.45 * status_speed * delta
+				enemy["attack_cooldown"] = float(enemy["attack_cooldown"]) - delta
+				if float(enemy["attack_cooldown"]) <= 0.0 and status_speed > 0.0:
+					enemy["shot_dir"] = direction
+					enemy["shot_charge"] = 0.52
 		elif enemy["kind"] == "dasher":
 			if float(enemy.get("dash_charge", 0.0)) > 0.0:
 				enemy["dash_charge"] = float(enemy["dash_charge"]) - delta
@@ -1274,8 +1285,10 @@ func _fire_apostle_burst(origin: Vector2) -> void:
 		})
 
 
-func _fire_mutant_shot(origin: Vector2) -> void:
-	var direction := origin.direction_to(player_pos)
+func _fire_mutant_shot(origin: Vector2, locked_direction: Vector2 = Vector2.ZERO) -> void:
+	var direction := locked_direction.normalized()
+	if direction == Vector2.ZERO:
+		direction = origin.direction_to(player_pos)
 	hostile_projectiles.append({
 		"pos": origin,
 		"velocity": direction * 255.0,
@@ -1785,6 +1798,11 @@ func _draw_enemy(enemy: Dictionary) -> void:
 			])
 			draw_colored_polygon(dasher_points, base_color)
 		"shooter":
+			if float(enemy.get("shot_charge", 0.0)) > 0.0:
+				var aim_alpha := 0.45 + 0.4 * sin(float(enemy["shot_charge"]) * 28.0)
+				var shot_direction: Vector2 = enemy.get("shot_dir", Vector2.RIGHT)
+				draw_line(position, position + shot_direction * 520.0, Color(0.78, 0.35, 1.0, aim_alpha), 3.0, true)
+				draw_arc(position, radius + 7.0, 0.0, TAU, 22, Color(0.9, 0.62, 1.0, aim_alpha), 3.0, true)
 			var shooter_points := PackedVector2Array([
 				position + Vector2(0.0, -radius),
 				position + Vector2(radius, radius * 0.82),
