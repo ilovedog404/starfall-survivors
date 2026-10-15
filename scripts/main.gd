@@ -7,8 +7,11 @@ const RUN_DURATION := 300.0
 const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
+const MAX_GEMS := 480
+const MAX_REPAIR_CORES := 24
+const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.6.1"
+const VERSION := "Beta0.6.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -200,6 +203,7 @@ func _process(delta: float) -> void:
 	_update_gems(delta)
 	_update_repair_cores(delta)
 	_update_effects(delta)
+	_enforce_runtime_limits()
 	_update_interface(delta)
 	queue_redraw()
 
@@ -1314,9 +1318,9 @@ func _kill_enemy(index: int) -> void:
 	var was_boss: bool = enemy["boss"]
 	var gem_value := 8.0 if enemy["elite"] else 1.0
 	if not was_boss:
-		gems.append({"pos": enemy["pos"], "value": gem_value})
+		_drop_experience_gem(enemy["pos"], gem_value)
 		if enemy["elite"]:
-			repair_cores.append({"pos": enemy["pos"], "heal": 24.0})
+			_drop_repair_core(enemy["pos"])
 	kills += 1
 	effects.append({"kind": "burst", "pos": enemy["pos"], "life": 0.24, "total": 0.24, "radius": float(enemy["radius"]) * 2.2})
 	enemies.remove_at(index)
@@ -1324,6 +1328,24 @@ func _kill_enemy(index: int) -> void:
 		apostle_present = false
 		apostle_hp = 0.0
 		_finish_game(true)
+
+
+func _drop_experience_gem(position: Vector2, value: float) -> void:
+	if gems.size() < MAX_GEMS:
+		gems.append({"pos": position, "value": value})
+		return
+	var receiver = gems[gems.size() - 1]
+	receiver["value"] = float(receiver["value"]) + value
+	gems[gems.size() - 1] = receiver
+
+
+func _drop_repair_core(position: Vector2) -> void:
+	if repair_cores.size() < MAX_REPAIR_CORES:
+		repair_cores.append({"pos": position, "heal": 24.0})
+		return
+	var receiver = repair_cores[repair_cores.size() - 1]
+	receiver["heal"] = minf(72.0, float(receiver["heal"]) + 8.0)
+	repair_cores[repair_cores.size() - 1] = receiver
 
 
 func _take_player_damage(amount: float) -> void:
@@ -1555,6 +1577,21 @@ func _update_effects(delta: float) -> void:
 		effects[index]["life"] = float(effects[index]["life"]) - delta
 		if float(effects[index]["life"]) <= 0.0:
 			effects.remove_at(index)
+
+
+func _enforce_runtime_limits() -> void:
+	if effects.size() > MAX_EFFECTS:
+		effects = effects.slice(effects.size() - MAX_EFFECTS)
+	while gems.size() > MAX_GEMS:
+		var overflow_gem = gems.pop_back()
+		var gem_receiver = gems[gems.size() - 1]
+		gem_receiver["value"] = float(gem_receiver["value"]) + float(overflow_gem["value"])
+		gems[gems.size() - 1] = gem_receiver
+	while repair_cores.size() > MAX_REPAIR_CORES:
+		var overflow_core = repair_cores.pop_back()
+		var core_receiver = repair_cores[repair_cores.size() - 1]
+		core_receiver["heal"] = minf(72.0, float(core_receiver["heal"]) + float(overflow_core["heal"]))
+		repair_cores[repair_cores.size() - 1] = core_receiver
 
 
 func _update_interface(delta: float) -> void:
