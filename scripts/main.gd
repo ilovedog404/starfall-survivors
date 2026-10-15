@@ -9,13 +9,14 @@ const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
+const MAX_EVOLUTION_CORES := 1
 const MAX_EFFECTS := 220
 const MAX_PLAYER_PROJECTILES := 220
 const MAX_HOSTILE_PROJECTILES := 180
 const LOW_DETAIL_ENEMY_COUNT := 220
 const DRAW_MARGIN := 180.0
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.10.2"
+const VERSION := "Beta0.11.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -143,6 +144,8 @@ var projectiles: Array = []
 var hostile_projectiles: Array = []
 var gems: Array = []
 var repair_cores: Array = []
+var evolution_cores: Array = []
+var evolution_cores_owned := 0
 var effects: Array = []
 var apostle_spawned := false
 var apostle_present := false
@@ -209,6 +212,7 @@ func _process(delta: float) -> void:
 	_update_hostile_projectiles(delta)
 	_update_gems(delta)
 	_update_repair_cores(delta)
+	_update_evolution_cores(delta)
 	_update_effects(delta)
 	_enforce_runtime_limits()
 	_update_interface(delta)
@@ -592,12 +596,12 @@ func _build_loadout_overlay() -> void:
 	build_overlay.add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(780.0, 560.0)
+	panel.custom_minimum_size = Vector2(780.0, 640.0)
 	center.add_child(panel)
 
 	var column := VBoxContainer.new()
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.add_theme_constant_override("separation", 20)
+	column.add_theme_constant_override("separation", 12)
 	panel.add_child(column)
 
 	var title := Label.new()
@@ -607,10 +611,11 @@ func _build_loadout_overlay() -> void:
 	column.add_child(title)
 
 	build_text = Label.new()
-	build_text.custom_minimum_size = Vector2(690.0, 390.0)
+	build_text.custom_minimum_size = Vector2(690.0, 470.0)
 	build_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	build_text.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	build_text.add_theme_font_size_override("font_size", 20)
+	build_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	build_text.add_theme_font_size_override("font_size", 18)
 	column.add_child(build_text)
 
 	var hint := Label.new()
@@ -804,6 +809,8 @@ func _start_game() -> void:
 	hostile_projectiles.clear()
 	gems.clear()
 	repair_cores.clear()
+	evolution_cores.clear()
+	evolution_cores_owned = 0
 	effects.clear()
 	apostle_spawned = false
 	apostle_present = false
@@ -910,12 +917,12 @@ func _toggle_build_overlay() -> void:
 func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
 	var starter_name := _starter_weapon_name()
-	var evolution_text := "進化條件：星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3" if selected_character == "claire" else "專屬能力：%s" % _starter_weapon_trait_text()
-	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5\n\n%s\n星針進化：星針 Lv.5 ＋ 冷卻模組 Lv.3\n重抽剩餘　%d" % [
+	var starter_display := "%s　已進化" % _starter_evolution_name() if scythe_evolved else "%s　Lv.%d / 5" % [starter_name, scythe_level]
+	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5\n\n%s\n進化核心　%d（精英異變體掉落）\n星針進化：星針 Lv.5 ＋ 冷卻模組 Lv.3\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
 		character_data["passive"],
-		("崩星護界　已進化" if scythe_evolved else "%s　Lv.%d / 5" % [starter_name, scythe_level]),
+		starter_display,
 		("未取得" if needle_level == 0 else ("追星蜂群　已進化" if needle_evolved else "Lv.%d / 5" % needle_level)),
 		("未取得" if storm_level == 0 else "Lv.%d / 5" % storm_level),
 		int(meta_levels["health"]),
@@ -925,7 +932,8 @@ func _update_build_text() -> void:
 		int(meta_levels["damage"]),
 		int(meta_levels["cooldown"]),
 		int(meta_levels["area"]),
-		evolution_text,
+		_starter_evolution_requirement_text(),
+		evolution_cores_owned,
 		rerolls_remaining,
 	]
 
@@ -940,6 +948,71 @@ func _starter_weapon_trait_text() -> String:
 
 func _starter_ring_color() -> Color:
 	return CHARACTERS[selected_character]["ring_color"]
+
+
+func _starter_evolution_data() -> Dictionary:
+	match selected_character:
+		"epathy":
+			return {"name": "疾風環斬", "passive_id": "armor", "passive_name": "強化裝甲"}
+		"lucia":
+			return {"name": "全域燃燒脈衝", "passive_id": "damage", "passive_name": "星源增幅"}
+		"rafari":
+			return {"name": "永凍領域", "passive_id": "cooldown", "passive_name": "冷卻模組"}
+		_:
+			return {"name": "超載鐮環", "passive_id": "area", "passive_name": "廣域線圈"}
+
+
+func _starter_evolution_name() -> String:
+	return String(_starter_evolution_data()["name"])
+
+
+func _starter_evolution_requirement_text() -> String:
+	if scythe_evolved:
+		return "專屬進化：%s（完成）" % _starter_evolution_name()
+	var data := _starter_evolution_data()
+	var passive_id: String = data["passive_id"]
+	var weapon_state := "完成" if scythe_level >= 5 else "%d / 5" % scythe_level
+	var passive_state := "完成" if int(meta_levels[passive_id]) >= 3 else "%d / 3" % int(meta_levels[passive_id])
+	var core_state := "已有" if evolution_cores_owned > 0 else "尚未取得"
+	return "專屬進化：%s｜%s Lv.5（%s）＋%s Lv.3（%s）＋進化核心（%s）" % [
+		data["name"], _starter_weapon_name(), weapon_state, data["passive_name"], passive_state, core_state,
+	]
+
+
+func _can_evolve_starter() -> bool:
+	if scythe_evolved or scythe_level < 5 or evolution_cores_owned <= 0:
+		return false
+	var passive_id: String = _starter_evolution_data()["passive_id"]
+	return int(meta_levels[passive_id]) >= 3
+
+
+func _try_consume_evolution_core() -> bool:
+	if not _can_evolve_starter():
+		return false
+	evolution_cores_owned -= 1
+	scythe_evolved = true
+	match selected_character:
+		"epathy":
+			scythe_damage += 14.0
+			scythe_radius += 28.0
+			scythe_interval *= 0.88
+		"lucia":
+			scythe_damage += 8.0
+			scythe_radius += 24.0
+			scythe_interval *= 0.86
+		"rafari":
+			scythe_damage += 8.0
+			scythe_radius += 20.0
+			scythe_interval *= 0.88
+		_:
+			scythe_damage += 10.0
+			scythe_radius += 36.0
+			scythe_interval *= 0.82
+			player_max_shield += 12.0
+			player_shield = player_max_shield
+	effects.append({"kind": "evolution", "pos": player_pos, "life": 1.15, "total": 1.15, "radius": scythe_radius, "color": _starter_ring_color()})
+	_show_game_notice("進化完成：%s" % _starter_evolution_name())
+	return true
 
 
 func _handle_upgrade_input() -> void:
@@ -971,13 +1044,16 @@ func _use_epathy_skill() -> void:
 		if player_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
 			continue
 		var enemy_direction: Vector2 = player_pos.direction_to(enemy["pos"])
-		if absf(wrapf(enemy_direction.angle() - slash_angle, -PI, PI)) > half_arc:
+		var angle_difference := absf(wrapf(enemy_direction.angle() - slash_angle, -PI, PI))
+		if angle_difference > half_arc and (not scythe_evolved or absf(angle_difference - PI) > half_arc):
 			continue
 		var push_direction: Vector2 = player_pos.direction_to(enemy["pos"])
 		enemy["pos"] += push_direction * (12.0 if enemy["boss"] else 34.0 + scythe_level * 5.0)
 		enemies[index] = enemy
 		_damage_enemy(index, scythe_damage * damage_multiplier * close_damage_multiplier, "starter")
 	effects.append({"kind": "slash", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius, "angle": slash_angle, "color": _starter_ring_color()})
+	if scythe_evolved:
+		effects.append({"kind": "slash", "pos": player_pos, "life": 0.42, "total": 0.42, "radius": radius, "angle": slash_angle + PI, "color": _starter_ring_color()})
 
 
 func _use_lucia_skill() -> void:
@@ -990,8 +1066,8 @@ func _use_lucia_skill() -> void:
 	if target_index < 0 or target_index >= enemies.size():
 		return
 	var aim_direction := player_pos.direction_to(enemies[target_index]["pos"])
-	var shot_count := 10 + (2 if scythe_level >= 3 else 0) + (2 if scythe_level >= 5 else 0)
-	var spread := 0.92 + 0.05 * float(scythe_level - 1)
+	var shot_count := 10 + (2 if scythe_level >= 3 else 0) + (2 if scythe_level >= 5 else 0) + (4 if scythe_evolved else 0)
+	var spread := 0.92 + 0.05 * float(scythe_level - 1) + (0.18 if scythe_evolved else 0.0)
 	var speed := 500.0
 	var travel_distance := 270.0 + maxf(0.0, scythe_radius - 132.0) * 1.25
 	for shot_index in shot_count:
@@ -1003,13 +1079,14 @@ func _use_lucia_skill() -> void:
 			"kind": "fireball",
 			"pos": player_pos,
 			"velocity": direction * speed,
-			"damage": scythe_damage * 0.38 * damage_multiplier,
+			"damage": scythe_damage * (0.42 if scythe_evolved else 0.38) * damage_multiplier,
 			"source": "starter",
 			"radius": 8.0 * projectile_area_scale,
 			"life": travel_distance / speed,
-			"burn_time": 1.5 * burn_duration_multiplier,
-			"burn_damage": scythe_damage * 0.08 * damage_multiplier,
+			"burn_time": (2.4 if scythe_evolved else 1.5) * burn_duration_multiplier,
+			"burn_damage": scythe_damage * (0.11 if scythe_evolved else 0.08) * damage_multiplier,
 			"color": _starter_ring_color(),
+			"evolved": scythe_evolved,
 		})
 
 
@@ -1019,34 +1096,42 @@ func _use_claire_skill() -> void:
 		var enemy = enemies[index]
 		var hit_radius: float = radius + float(enemy["radius"])
 		if player_pos.distance_squared_to(enemy["pos"]) <= hit_radius * hit_radius:
-			_damage_enemy(index, scythe_damage * damage_multiplier, "starter")
+			_damage_enemy(index, scythe_damage * damage_multiplier * (1.3 if scythe_evolved else 1.0), "starter")
 	var shield_restore := 1.2 + scythe_level * 0.35 + (3.0 if scythe_evolved else 0.0)
 	player_shield = minf(player_max_shield, player_shield + shield_restore)
 	effects.append({"kind": "pulse", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": radius, "color": _starter_ring_color()})
+	if scythe_evolved:
+		effects.append({"kind": "pulse", "pos": player_pos, "life": 0.72, "total": 0.72, "radius": radius * 0.72, "color": _starter_ring_color().lightened(0.32)})
 
 
 func _use_rafari_skill() -> void:
 	if enemies.is_empty():
 		return
-	var nearest := _nearest_enemy_indices(1)
+	var nearest := _nearest_enemy_indices(3 if scythe_evolved else 1)
 	if nearest.is_empty():
 		return
-	var target_index: int = nearest[0]
-	if target_index < 0 or target_index >= enemies.size():
-		return
-	var target_pos: Vector2 = enemies[target_index]["pos"]
 	var radius := minf(90.0, 58.0 + maxf(0.0, scythe_radius - 132.0) * 0.35)
+	var target_positions: Array = []
+	for target_index in nearest:
+		if target_index >= 0 and target_index < enemies.size():
+			target_positions.append(enemies[target_index]["pos"])
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
 		var hit_radius: float = radius + float(enemy["radius"])
-		if target_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
+		var inside_frost := false
+		for target_pos in target_positions:
+			if target_pos.distance_squared_to(enemy["pos"]) <= hit_radius * hit_radius:
+				inside_frost = true
+				break
+		if not inside_frost:
 			continue
-		var base_slow_time := (1.8 if enemy["boss"] else 1.1) + scythe_level * 0.12
-		enemy["slow_time"] = base_slow_time * slow_effect_multiplier
-		enemy["slow_factor"] = 0.52 if enemy["boss"] else 0.28
+		var base_slow_time := (2.4 if enemy["boss"] else 1.7) if scythe_evolved else ((1.8 if enemy["boss"] else 1.1) + scythe_level * 0.12)
+		enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), base_slow_time * slow_effect_multiplier)
+		enemy["slow_factor"] = 0.38 if enemy["boss"] and scythe_evolved else (0.52 if enemy["boss"] else (0.0 if scythe_evolved else 0.28))
 		enemies[index] = enemy
-		_damage_enemy(index, scythe_damage * 0.72 * damage_multiplier, "starter")
-	effects.append({"kind": "ice", "pos": target_pos, "life": 0.72, "total": 0.72, "radius": radius, "color": _starter_ring_color()})
+		_damage_enemy(index, scythe_damage * (0.88 if scythe_evolved else 0.72) * damage_multiplier, "starter")
+	for target_pos in target_positions:
+		effects.append({"kind": "ice", "pos": target_pos, "life": 0.92 if scythe_evolved else 0.72, "total": 0.92 if scythe_evolved else 0.72, "radius": radius, "color": _starter_ring_color()})
 
 
 func _update_spawning(delta: float) -> void:
@@ -1490,6 +1575,7 @@ func _kill_enemy(index: int) -> void:
 		_drop_experience_gem(enemy["pos"], gem_value)
 		if enemy["elite"]:
 			_drop_repair_core(enemy["pos"])
+			_drop_evolution_core(enemy["pos"])
 	kills += 1
 	effects.append({"kind": "burst", "pos": enemy["pos"], "life": 0.24, "total": 0.24, "radius": float(enemy["radius"]) * 2.2})
 	enemies.remove_at(index)
@@ -1515,6 +1601,14 @@ func _drop_repair_core(position: Vector2) -> void:
 	var receiver = repair_cores[repair_cores.size() - 1]
 	receiver["heal"] = minf(72.0, float(receiver["heal"]) + 8.0)
 	repair_cores[repair_cores.size() - 1] = receiver
+
+
+func _drop_evolution_core(position: Vector2) -> void:
+	if scythe_evolved or evolution_cores_owned > 0:
+		return
+	if evolution_cores.size() >= MAX_EVOLUTION_CORES:
+		return
+	evolution_cores.append({"pos": position + Vector2(22.0, -8.0)})
 
 
 func _take_player_damage(amount: float) -> void:
@@ -1572,6 +1666,24 @@ func _update_repair_cores(delta: float) -> void:
 			repair_cores.remove_at(index)
 		else:
 			repair_cores[index] = core
+
+
+func _update_evolution_cores(delta: float) -> void:
+	for index in range(evolution_cores.size() - 1, -1, -1):
+		var core = evolution_cores[index]
+		var pickup_distance := pickup_radius * 1.65
+		var distance_squared: float = core["pos"].distance_squared_to(player_pos)
+		if distance_squared <= pickup_distance * pickup_distance:
+			var distance := sqrt(distance_squared)
+			var pull_speed: float = 225.0 + maxf(0.0, pickup_distance - distance) * 3.4
+			core["pos"] += core["pos"].direction_to(player_pos) * pull_speed * delta
+		if core["pos"].distance_squared_to(player_pos) <= 729.0:
+			evolution_cores_owned = 1
+			evolution_cores.remove_at(index)
+			if not _try_consume_evolution_core():
+				_show_game_notice("取得進化核心｜達成條件後自動進化")
+		else:
+			evolution_cores[index] = core
 
 
 func _gain_experience(amount: float) -> void:
@@ -1639,7 +1751,7 @@ func _pick_upgrade_choices(candidates: Array) -> Array:
 
 
 func _is_weapon_upgrade(upgrade_id: String) -> bool:
-	return upgrade_id in ["scythe", "scythe_evolution", "needle", "needle_evolution", "storm"]
+	return upgrade_id in ["scythe", "needle", "needle_evolution", "storm"]
 
 
 func _reroll_upgrades() -> void:
@@ -1656,12 +1768,6 @@ func _available_upgrades() -> Array:
 			"id": "scythe",
 			"name": "%s Lv.%d" % [_starter_weapon_name(), scythe_level + 1],
 			"description": _scythe_upgrade_description(scythe_level + 1),
-		})
-	elif selected_character == "claire" and int(meta_levels["armor"]) >= 3 and not scythe_evolved:
-		result.append({
-			"id": "scythe_evolution",
-			"name": "進化：崩星護界",
-			"description": "星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3\n大幅提高傷害、範圍、攻速與護盾回復",
 		})
 	if needle_level < 5:
 		result.append({
@@ -1751,13 +1857,6 @@ func _select_upgrade(upgrade_id: String) -> void:
 					scythe_damage += 14.0
 					if selected_character == "claire":
 						player_max_shield += 8.0
-		"scythe_evolution":
-			if selected_character == "claire" and scythe_level >= 5 and int(meta_levels["armor"]) >= 3 and not scythe_evolved:
-				scythe_evolved = true
-				scythe_radius += 36.0
-				scythe_interval *= 0.82
-				player_max_shield += 12.0
-				player_shield = player_max_shield
 		"needle":
 			needle_level += 1
 			match needle_level:
@@ -1802,6 +1901,8 @@ func _select_upgrade(upgrade_id: String) -> void:
 			storm_radius += 7.0
 			projectile_area_scale *= 1.08
 
+	_try_consume_evolution_core()
+
 	pending_levels = maxi(0, pending_levels - 1)
 	if pending_levels > 0:
 		_show_upgrade_choices()
@@ -1825,6 +1926,8 @@ func _enforce_runtime_limits() -> void:
 		projectiles = projectiles.slice(projectiles.size() - MAX_PLAYER_PROJECTILES)
 	if hostile_projectiles.size() > MAX_HOSTILE_PROJECTILES:
 		hostile_projectiles = hostile_projectiles.slice(hostile_projectiles.size() - MAX_HOSTILE_PROJECTILES)
+	if evolution_cores.size() > MAX_EVOLUTION_CORES:
+		evolution_cores = evolution_cores.slice(evolution_cores.size() - MAX_EVOLUTION_CORES)
 	while gems.size() > MAX_GEMS:
 		var overflow_gem = gems.pop_back()
 		var gem_receiver = gems[gems.size() - 1]
@@ -1871,11 +1974,11 @@ func _update_interface(delta: float) -> void:
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
 	weapon_label.text = "%s\n星針 %s｜脈衝雷暴 %s" % [
-		("崩星護界｜進化" if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜超載" if scythe_level >= 5 else "")]),
+		("%s｜進化" % _starter_evolution_name() if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜待核心" if scythe_level >= 5 else "")]),
 		("未取得" if needle_level == 0 else ("追星蜂群｜進化" if needle_evolved else "Lv.%d" % needle_level)),
 		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
 	]
-	var skill_name: String = CHARACTERS[selected_character]["skill_name"]
+	var skill_name: String = _starter_evolution_name() if scythe_evolved else CHARACTERS[selected_character]["skill_name"]
 	skill_label.text = "自動能力｜%s\n每 %.1f 秒發動" % [skill_name, scythe_interval]
 	skill_label.modulate = _starter_ring_color()
 	xp_bar.max_value = experience_required
@@ -1911,7 +2014,7 @@ func _finish_game(victory: bool) -> void:
 		level,
 		int(total_damage_dealt),
 		int(total_damage_taken),
-		_starter_weapon_name(),
+		(_starter_evolution_name() if scythe_evolved else _starter_weapon_name()),
 		int(damage_by_source["starter"]),
 		int(damage_by_source["needle"]),
 		int(damage_by_source["storm"]),
@@ -1944,6 +2047,18 @@ func _draw() -> void:
 		draw_arc(core_pos, 12.0, 0.0, TAU, 24, Color(0.35, 1.0, 0.72), 3.0, true)
 		draw_rect(Rect2(core_pos + Vector2(-3.0, -8.0), Vector2(6.0, 16.0)), Color(0.7, 1.0, 0.86))
 		draw_rect(Rect2(core_pos + Vector2(-8.0, -3.0), Vector2(16.0, 6.0)), Color(0.7, 1.0, 0.86))
+
+	for core in evolution_cores:
+		var core_pos: Vector2 = core["pos"]
+		if not _is_world_visible(core_pos, 36.0):
+			continue
+		var pulse := 1.0 + sin(game_time * 5.5) * 0.12
+		var outer_points := PackedVector2Array()
+		for point_index in 6:
+			outer_points.append(core_pos + Vector2.from_angle(TAU * float(point_index) / 6.0) * 16.0 * pulse)
+		draw_colored_polygon(outer_points, Color(1.0, 0.72, 0.18, 0.88))
+		draw_arc(core_pos, 21.0 * pulse, 0.0, TAU, 28, Color(0.45, 0.95, 1.0, 0.78), 4.0, true)
+		draw_circle(core_pos, 6.0, Color(0.96, 1.0, 0.78))
 
 	for projectile in projectiles:
 		if not _is_world_visible(projectile["pos"], 48.0):
@@ -2124,6 +2239,12 @@ func _draw_effect(effect: Dictionary) -> void:
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.6 + progress), 0.0, TAU, 32, Color(1.0, 0.2, 0.28, alpha), 8.0)
 		"warning":
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.7 + 0.3 * progress), 0.0, TAU, 64, Color(1.0, 0.12, 0.4, alpha), 9.0)
+		"evolution":
+			var evolution_color: Color = effect.get("color", Color(0.4, 0.92, 1.0))
+			var evolution_radius := float(effect["radius"]) * (0.18 + progress * 0.82)
+			draw_circle(effect["pos"], evolution_radius, Color(evolution_color, alpha * 0.08))
+			draw_arc(effect["pos"], evolution_radius, 0.0, TAU, 72, Color(evolution_color.lightened(0.35), alpha), 12.0, true)
+			draw_arc(effect["pos"], evolution_radius * 0.72, -progress * TAU, (1.0 - progress) * TAU, 56, Color(1.0, 0.82, 0.28, alpha), 6.0, true)
 		"slash":
 			var slash_color: Color = effect.get("color", Color(1.0, 0.55, 0.65))
 			var slash_angle: float = float(effect.get("angle", 0.0))

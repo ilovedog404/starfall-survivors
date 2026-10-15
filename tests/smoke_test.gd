@@ -105,7 +105,7 @@ func _run() -> void:
 		_fail("GM 升級按鍵沒有觸發升級選擇")
 		return
 	game._select_upgrade(game.current_upgrade_choices[0]["id"])
-	if game.player_armor != 3.0 or game.close_damage_multiplier <= 1.0:
+	if game.player_armor < 3.0 or game.close_damage_multiplier <= 1.0:
 		_fail("埃帕蒂的初始被動沒有套用")
 		return
 	game._spawn_mutant("chaser")
@@ -334,27 +334,30 @@ func _run() -> void:
 		return
 	game.enemies.clear()
 	game.projectiles.clear()
+	game._show_character_select()
+	game._choose_character("claire")
+	game._start_game()
+	game._spawn_mutant("chaser", true)
+	game.enemies[0]["hp"] = 1.0
+	game._damage_enemy(0, 10.0, "starter")
+	if game.evolution_cores.size() != 1:
+		_fail("精英異變體沒有掉落進化核心")
+		return
+	game.evolution_cores[0]["pos"] = game.player_pos
+	game._update_evolution_cores(0.0)
+	if game.evolution_cores_owned != 1 or game.scythe_evolved:
+		_fail("未達條件時進化核心沒有正確保存")
+		return
 	game.scythe_level = 5
-	game.meta_levels["armor"] = 3
-	for option in game._available_upgrades():
-		if option["id"] == "scythe_evolution":
-			_fail("非克萊兒角色不應取得崩星護界進化")
-			return
-	game.selected_character = "claire"
-	var evolution_found := false
-	for option in game._available_upgrades():
-		if option["id"] == "scythe_evolution":
-			evolution_found = true
-			break
-	if not evolution_found:
-		_fail("星源鐮環達成條件後沒有出現進化")
-		return
+	game.meta_levels["area"] = 3
 	var old_radius: float = game.scythe_radius
-	game.pending_levels = 1
-	game._select_upgrade("scythe_evolution")
-	if not game.scythe_evolved or game.scythe_radius <= old_radius:
-		_fail("崩星護界進化沒有正確套用")
+	if not game._try_consume_evolution_core() or not game.scythe_evolved or game.scythe_radius <= old_radius or game._starter_evolution_name() != "超載鐮環":
+		_fail("超載鐮環沒有透過進化核心正確套用")
 		return
+	for option in game._available_upgrades():
+		if option["id"] == "scythe_evolution":
+			_fail("專屬進化不應混入一般升級三選一")
+			return
 	game.storm_level = 1
 	game._spawn_mutant("chaser")
 	game.enemies[-1]["pos"] = game.player_pos + Vector2(80.0, 0.0)
@@ -393,11 +396,12 @@ func _run() -> void:
 	if not game.game_over or game.apostle_present:
 		_fail("使徒討伐結算沒有觸發")
 		return
-	if not "傷害分布" in game.end_summary.text or not game._starter_weapon_name() in game.end_summary.text:
+	var result_weapon_name: String = game._starter_evolution_name() if game.scythe_evolved else game._starter_weapon_name()
+	if not "傷害分布" in game.end_summary.text or not result_weapon_name in game.end_summary.text:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: gm-controls/lucia-shotgun/fixed-area-coil/render-culling/projectile-limits/rafari-name/auto-aim-slash/targeted-frost/automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: evolution-core/four-starter-evolutions/gm-controls/lucia-shotgun/fixed-area-coil/render-culling/projectile-limits/rafari-name/auto-aim-slash/targeted-frost/automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

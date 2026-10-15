@@ -35,6 +35,9 @@ func _run() -> void:
 	if game.repair_cores.size() > game.MAX_REPAIR_CORES:
 		_fail("修復核心超過執行期上限")
 		return
+	if game.evolution_cores.size() > game.MAX_EVOLUTION_CORES:
+		_fail("進化核心超過執行期上限")
+		return
 	if game.effects.size() > game.MAX_EFFECTS:
 		_fail("特效超過執行期上限")
 		return
@@ -83,8 +86,8 @@ func _run() -> void:
 		_fail("大量敵人投射物碰撞測試逾時：%.1fms" % stress_milliseconds)
 		return
 
-	print("PERFORMANCE_TEST_PASS: enemies=%d gems=%d repair_cores=%d effects=%d projectiles=%d hostile=%d collision_stress=%.1fms xp=%.0f" % [
-		game.enemies.size(), game.gems.size(), game.repair_cores.size(), game.effects.size(), game.projectiles.size(), game.hostile_projectiles.size(), stress_milliseconds, stored_experience,
+	print("PERFORMANCE_TEST_PASS: enemies=%d gems=%d repair_cores=%d evolution_cores=%d effects=%d projectiles=%d hostile=%d collision_stress=%.1fms xp=%.0f" % [
+		game.enemies.size(), game.gems.size(), game.repair_cores.size(), game.evolution_cores.size(), game.effects.size(), game.projectiles.size(), game.hostile_projectiles.size(), stress_milliseconds, stored_experience,
 	])
 	get_tree().quit(0)
 
