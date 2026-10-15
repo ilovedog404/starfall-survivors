@@ -14,7 +14,7 @@ func _run() -> void:
 
 	var summaries: Array[String] = []
 	var character_ids := ["epathy", "lucia", "claire", "rafari"]
-	var expected_effects := {"epathy": "slash", "lucia": "fire", "claire": "pulse", "rafari": "ice"}
+	var expected_effects := {"epathy": "slash", "lucia": "fireball", "claire": "pulse", "rafari": "ice"}
 	for character_index in character_ids.size():
 		var character_id: String = character_ids[character_index]
 		var game = packed_scene.instantiate()
@@ -31,15 +31,25 @@ func _run() -> void:
 		game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
 		game.enemies[0]["hp"] = 500.0
 		game.enemies[0]["max_hp"] = 500.0
+		var target_pos: Vector2 = game.enemies[0]["pos"]
 		game._fire_scythe_ring()
-		if game.effects.is_empty() or game.effects[-1]["kind"] != expected_effects[character_id]:
-			_fail("%s 沒有使用企劃書指定的自動能力表現" % character_id)
-			return
-		if game.effects[-1].get("color", Color.BLACK) != game._starter_ring_color():
-			_fail("%s 的自動能力沒有使用角色專屬色" % character_id)
+		if character_id == "lucia":
+			if game.projectiles.size() != 1 or game.projectiles[0].get("kind", "") != "fireball" or game.projectiles[0].get("color", Color.BLACK) != game._starter_ring_color():
+				_fail("璐茜婭沒有射出一顆專屬色火球")
+				return
+		else:
+			if game.effects.is_empty() or game.effects[-1]["kind"] != expected_effects[character_id]:
+				_fail("%s 沒有使用企劃書指定的自動能力表現" % character_id)
+				return
+			if game.effects[-1].get("color", Color.BLACK) != game._starter_ring_color():
+				_fail("%s 的自動能力沒有使用角色專屬色" % character_id)
+				return
+		if character_id == "rafari" and (game.effects[-1]["pos"] != target_pos or float(game.effects[-1]["radius"]) > 90.0 or game.scythe_interval < 2.8):
+			_fail("菈法瑞沒有在敵人腳下生成慢頻率小範圍冰霜")
 			return
 		game.enemies.clear()
 		game.effects.clear()
+		game.projectiles.clear()
 
 		var delta := 1.0 / 30.0
 		var steps := int(90.0 / delta)

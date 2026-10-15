@@ -28,10 +28,10 @@ const CHARACTERS := {
 		"name": "璐茜婭",
 		"role": "法術／持續傷害",
 		"passive": "燃燒持續時間 +30%",
-		"skill": "定期以緋色脈衝點燃畫面內的異變體",
+		"skill": "自動向最近異變體發射火球，升級後增加火球數量",
 		"skill_name": "緋色脈衝",
 		"starter_weapon": "緋色脈衝",
-		"starter_trait": "全畫面低傷害脈衝並附加燃燒",
+		"starter_trait": "自動追蹤火球，命中後附加燃燒",
 		"ring_color": Color(1.0, 0.42, 0.16),
 		"color": Color(0.92, 0.45, 1.0),
 	},
@@ -47,13 +47,13 @@ const CHARACTERS := {
 		"color": Color(0.6, 0.92, 1.0),
 	},
 	"rafari": {
-		"name": "菈法瑞・零度・諾恩",
+		"name": "菈法瑞",
 		"role": "控場／冰霜",
 		"passive": "減速效果提高",
-		"skill": "定期釋放冰霜波；凍緩普通敵人並大幅減速使徒",
+		"skill": "定期在敵人腳下生成小範圍冰霜並凍緩敵人",
 		"skill_name": "零度領域",
 		"starter_weapon": "零度領域",
-		"starter_trait": "冰霜波造成傷害並附加凍緩",
+		"starter_trait": "鎖定敵人腳下的小範圍冰霜",
 		"ring_color": Color(0.42, 0.62, 1.0),
 		"color": Color(0.55, 0.72, 1.0),
 	},
@@ -722,7 +722,11 @@ func _start_game() -> void:
 	scythe_level = 1
 	scythe_damage = 24.0
 	scythe_radius = 132.0
-	scythe_interval = 1.55
+	match selected_character:
+		"epathy": scythe_interval = 1.4
+		"lucia": scythe_interval = 1.9
+		"rafari": scythe_interval = 2.8
+		_: scythe_interval = 1.55
 	scythe_timer = 0.25
 	scythe_evolved = false
 	needle_level = 0
@@ -855,30 +859,48 @@ func _update_player(delta: float) -> void:
 
 func _use_epathy_skill() -> void:
 	var radius := scythe_radius
+	var slash_direction := _nearest_enemy_direction()
+	var slash_angle := slash_direction.angle()
+	var half_arc := 1.25
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
 		if player_pos.distance_to(enemy["pos"]) > radius + float(enemy["radius"]):
+			continue
+		var enemy_direction: Vector2 = player_pos.direction_to(enemy["pos"])
+		if absf(wrapf(enemy_direction.angle() - slash_angle, -PI, PI)) > half_arc:
 			continue
 		var push_direction: Vector2 = player_pos.direction_to(enemy["pos"])
 		enemy["pos"] += push_direction * (12.0 if enemy["boss"] else 34.0 + scythe_level * 5.0)
 		enemies[index] = enemy
 		_damage_enemy(index, scythe_damage * damage_multiplier * close_damage_multiplier, "starter")
-	effects.append({"kind": "slash", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius, "color": _starter_ring_color()})
+	effects.append({"kind": "slash", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius, "angle": slash_angle, "color": _starter_ring_color()})
 
 
 func _use_lucia_skill() -> void:
-	var ignited := 0
-	for index in range(enemies.size() - 1, -1, -1):
-		var enemy = enemies[index]
-		if player_pos.distance_to(enemy["pos"]) > 680.0 + float(enemy["radius"]):
+	if enemies.is_empty():
+		return
+	var shot_count := 1
+	if scythe_level >= 3:
+		shot_count += 1
+	if scythe_level >= 5:
+		shot_count += 1
+	for enemy_index in _nearest_enemy_indices(shot_count):
+		if enemy_index < 0 or enemy_index >= enemies.size():
 			continue
-		enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), (2.2 + scythe_level * 0.2) * burn_duration_multiplier)
-		enemy["burn_tick"] = 0.0
-		enemy["burn_damage"] = maxf(float(enemy.get("burn_damage", 0.0)), scythe_damage * 0.24 * damage_multiplier)
-		enemies[index] = enemy
-		_damage_enemy(index, scythe_damage * 0.24 * damage_multiplier, "starter")
-		ignited += 1
-	effects.append({"kind": "fire", "pos": player_pos, "life": 0.62, "total": 0.62, "radius": 360.0 + mini(ignited, 30) * 4.0, "color": _starter_ring_color()})
+		var target_pos: Vector2 = enemies[enemy_index]["pos"]
+		var direction := player_pos.direction_to(target_pos)
+		projectiles.append({
+			"kind": "fireball",
+			"pos": player_pos,
+			"velocity": direction * 420.0,
+			"damage": scythe_damage * 0.9 * damage_multiplier,
+			"source": "starter",
+			"radius": 10.0,
+			"life": 2.2,
+			"burn_time": 1.8 * burn_duration_multiplier,
+			"burn_damage": scythe_damage * 0.15 * damage_multiplier,
+			"color": _starter_ring_color(),
+		})
 
 
 func _use_claire_skill() -> void:
@@ -893,16 +915,26 @@ func _use_claire_skill() -> void:
 
 
 func _use_rafari_skill() -> void:
-	var radius := scythe_radius * 1.15
+	if enemies.is_empty():
+		return
+	var nearest := _nearest_enemy_indices(1)
+	if nearest.is_empty():
+		return
+	var target_index: int = nearest[0]
+	if target_index < 0 or target_index >= enemies.size():
+		return
+	var target_pos: Vector2 = enemies[target_index]["pos"]
+	var radius := minf(90.0, 58.0 + maxf(0.0, scythe_radius - 132.0) * 0.35)
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
-		if player_pos.distance_to(enemy["pos"]) > radius + float(enemy["radius"]):
+		if target_pos.distance_to(enemy["pos"]) > radius + float(enemy["radius"]):
 			continue
-		enemy["slow_time"] = (1.8 if enemy["boss"] else 1.35) * slow_effect_multiplier
+		var base_slow_time := (1.8 if enemy["boss"] else 1.1) + scythe_level * 0.12
+		enemy["slow_time"] = base_slow_time * slow_effect_multiplier
 		enemy["slow_factor"] = 0.52 if enemy["boss"] else 0.28
 		enemies[index] = enemy
 		_damage_enemy(index, scythe_damage * 0.72 * damage_multiplier, "starter")
-	effects.append({"kind": "ice", "pos": player_pos, "life": 0.65, "total": 0.65, "radius": radius, "color": _starter_ring_color()})
+	effects.append({"kind": "ice", "pos": target_pos, "life": 0.72, "total": 0.72, "radius": radius, "color": _starter_ring_color()})
 
 
 func _update_spawning(delta: float) -> void:
@@ -1121,6 +1153,16 @@ func _nearest_enemy_indices(count: int) -> Array:
 	return result
 
 
+func _nearest_enemy_direction() -> Vector2:
+	var nearest := _nearest_enemy_indices(1)
+	if nearest.is_empty():
+		return Vector2.RIGHT
+	var target_index: int = nearest[0]
+	if target_index < 0 or target_index >= enemies.size():
+		return Vector2.RIGHT
+	return player_pos.direction_to(enemies[target_index]["pos"])
+
+
 func _update_projectiles(delta: float) -> void:
 	for projectile_index in range(projectiles.size() - 1, -1, -1):
 		var projectile = projectiles[projectile_index]
@@ -1130,6 +1172,11 @@ func _update_projectiles(delta: float) -> void:
 		for enemy_index in range(enemies.size() - 1, -1, -1):
 			var enemy = enemies[enemy_index]
 			if projectile["pos"].distance_to(enemy["pos"]) <= float(projectile["radius"]) + float(enemy["radius"]):
+				if projectile.get("kind", "") == "fireball":
+					enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), float(projectile.get("burn_time", 0.0)))
+					enemy["burn_tick"] = 0.0
+					enemy["burn_damage"] = maxf(float(enemy.get("burn_damage", 0.0)), float(projectile.get("burn_damage", 0.0)))
+					enemies[enemy_index] = enemy
 				_damage_enemy(enemy_index, float(projectile["damage"]), String(projectile.get("source", "other")))
 				consumed = true
 				break
@@ -1514,6 +1561,18 @@ func _available_upgrades() -> Array:
 
 
 func _scythe_upgrade_description(next_level: int) -> String:
+	if selected_character == "lucia":
+		match next_level:
+			2: return "火球傷害 +10"
+			3: return "每次額外射出 1 顆火球"
+			4: return "火球發射間隔縮短 20%"
+			5: return "再增加 1 顆火球，傷害 +14"
+	if selected_character == "rafari":
+		match next_level:
+			2: return "冰霜傷害 +10"
+			3: return "冰霜範圍小幅增加"
+			4: return "冰霜生成間隔縮短 20%"
+			5: return "提高冰霜傷害與凍緩時間"
 	match next_level:
 		2: return "%s傷害 +10" % _starter_weapon_name()
 		3: return "%s作用範圍 +34" % _starter_weapon_name()
@@ -1552,7 +1611,8 @@ func _select_upgrade(upgrade_id: String) -> void:
 				4: scythe_interval *= 0.8
 				5:
 					scythe_damage += 14.0
-					player_max_shield += 8.0
+					if selected_character == "claire":
+						player_max_shield += 8.0
 		"scythe_evolution":
 			if selected_character == "claire" and scythe_level >= 5 and int(meta_levels["armor"]) >= 3 and not scythe_evolved:
 				scythe_evolved = true
@@ -1736,8 +1796,14 @@ func _draw() -> void:
 
 	for projectile in projectiles:
 		var direction: Vector2 = projectile["velocity"].normalized()
-		var projectile_color := Color(0.95, 0.62, 1.0) if projectile.get("evolved", false) else Color(0.5, 0.95, 1.0)
-		draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
+		if projectile.get("kind", "") == "fireball":
+			var fireball_color: Color = projectile.get("color", Color(1.0, 0.42, 0.16))
+			draw_line(projectile["pos"] - direction * 18.0, projectile["pos"], Color(fireball_color, 0.48), 8.0, true)
+			draw_circle(projectile["pos"], float(projectile["radius"]), fireball_color)
+			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.46, fireball_color.lightened(0.55))
+		else:
+			var projectile_color := Color(0.95, 0.62, 1.0) if projectile.get("evolved", false) else Color(0.5, 0.95, 1.0)
+			draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
 
 	for projectile in hostile_projectiles:
 		draw_circle(projectile["pos"], float(projectile["radius"]), Color(1.0, 0.2, 0.48))
@@ -1885,7 +1951,8 @@ func _draw_effect(effect: Dictionary) -> void:
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.7 + 0.3 * progress), 0.0, TAU, 64, Color(1.0, 0.12, 0.4, alpha), 9.0)
 		"slash":
 			var slash_color: Color = effect.get("color", Color(1.0, 0.55, 0.65))
-			draw_arc(effect["pos"], float(effect["radius"]) * (0.55 + 0.45 * progress), -1.4, 2.7, 52, Color(slash_color, alpha), 12.0, true)
+			var slash_angle: float = float(effect.get("angle", 0.0))
+			draw_arc(effect["pos"], float(effect["radius"]) * (0.55 + 0.45 * progress), slash_angle - 1.25, slash_angle + 1.25, 40, Color(slash_color, alpha), 12.0, true)
 		"fire":
 			var fire_color: Color = effect.get("color", Color(1.0, 0.5, 0.14))
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(fire_color, alpha * 0.16))
@@ -1919,11 +1986,9 @@ func _draw_player() -> void:
 	if scythe_timer < 0.22:
 		var preview_color := Color(_starter_ring_color(), 0.18)
 		match selected_character:
-			"epathy": draw_arc(player_pos, scythe_radius, -1.4, 2.7, 40, preview_color, 3.0)
-			"lucia": draw_circle(player_pos, minf(360.0, scythe_radius * 2.4), preview_color)
+			"epathy":
+				var slash_angle := _nearest_enemy_direction().angle()
+				draw_arc(player_pos, scythe_radius, slash_angle - 1.25, slash_angle + 1.25, 40, preview_color, 3.0)
+			"lucia": draw_circle(player_pos, 22.0, preview_color)
 			"claire": draw_arc(player_pos, scythe_radius, 0.0, TAU, 48, preview_color, 3.0)
-			"rafari":
-				draw_arc(player_pos, scythe_radius * 1.15, 0.0, TAU, 48, preview_color, 3.0)
-				for spoke in 6:
-					var angle := TAU * float(spoke) / 6.0
-					draw_line(player_pos + Vector2.from_angle(angle) * 28.0, player_pos + Vector2.from_angle(angle) * scythe_radius, preview_color, 2.0)
+			"rafari": draw_circle(player_pos, 18.0, preview_color)

@@ -28,6 +28,9 @@ func _run() -> void:
 		if not game._starter_weapon_name() in game.character_detail.text or not String(game.CHARACTERS[character_id]["skill_name"]) in game.character_detail.text:
 			_fail("角色選擇頁沒有顯示專屬自動能力：" + character_id)
 			return
+	if String(game.CHARACTERS["rafari"]["name"]) != "菈法瑞":
+		_fail("菈法瑞的角色名稱不正確")
+		return
 	game._choose_character("lucia")
 	game._start_game()
 	game._spawn_mutant("chaser")
@@ -35,8 +38,27 @@ func _run() -> void:
 	game.enemies[0]["hp"] = 500.0
 	game.enemies[0]["max_hp"] = 500.0
 	game._fire_scythe_ring()
-	if float(game.enemies[0]["burn_time"]) <= 0.0 or game._starter_weapon_name() != "緋色脈衝" or game.effects[-1]["kind"] != "fire" or game.effects[-1]["color"] != game._starter_ring_color():
-		_fail("璐茜婭的緋色脈衝沒有以專屬顏色附加燃燒")
+	if game.projectiles.size() != 1 or game.projectiles[0].get("kind", "") != "fireball" or game.projectiles[0].get("color", Color.BLACK) != game._starter_ring_color():
+		_fail("璐茜婭 Lv.1 沒有射出一顆專屬色火球")
+		return
+	game._update_projectiles(0.1)
+	if float(game.enemies[0]["burn_time"]) <= 0.0 or float(game.enemies[0]["hp"]) >= 500.0 or game._starter_weapon_name() != "緋色脈衝":
+		_fail("璐茜婭火球命中後沒有造成傷害與燃燒")
+		return
+	game.projectiles.clear()
+	for extra_target in 2:
+		game._spawn_mutant("chaser")
+		game.enemies[-1]["pos"] = game.player_pos + Vector2(90.0, (extra_target + 1) * 50.0)
+	game.scythe_level = 3
+	game._fire_scythe_ring()
+	if game.projectiles.size() != 2:
+		_fail("璐茜婭 Lv.3 沒有增加為兩顆火球")
+		return
+	game.projectiles.clear()
+	game.scythe_level = 5
+	game._fire_scythe_ring()
+	if game.projectiles.size() != 3:
+		_fail("璐茜婭 Lv.5 沒有增加為三顆火球")
 		return
 
 	game._show_character_select()
@@ -46,9 +68,10 @@ func _run() -> void:
 	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
 	game.enemies[0]["hp"] = 500.0
 	game.enemies[0]["max_hp"] = 500.0
+	var frost_target_pos: Vector2 = game.enemies[0]["pos"]
 	game._fire_scythe_ring()
-	if float(game.enemies[0]["slow_factor"]) >= 1.0 or game._starter_weapon_name() != "零度領域" or game.effects[-1]["kind"] != "ice" or game.effects[-1]["color"] != game._starter_ring_color():
-		_fail("菈法瑞的零度領域沒有以專屬顏色附加冰緩")
+	if float(game.enemies[0]["slow_factor"]) >= 1.0 or game._starter_weapon_name() != "零度領域" or game.effects[-1]["kind"] != "ice" or game.effects[-1]["color"] != game._starter_ring_color() or game.effects[-1]["pos"] != frost_target_pos or float(game.effects[-1]["radius"]) > 90.0 or game.scythe_interval < 2.8:
+		_fail("菈法瑞的零度領域沒有在敵人腳下生成慢頻率小範圍冰霜")
 		return
 
 	game._show_character_select()
@@ -72,8 +95,19 @@ func _run() -> void:
 	game.enemies[0]["max_hp"] = 500.0
 	var enemy_x_before: float = game.enemies[0]["pos"].x
 	game._fire_scythe_ring()
-	if float(game.enemies[0]["pos"].x) <= enemy_x_before or game._starter_weapon_name() != "疾風短刃" or game.effects[-1]["kind"] != "slash" or game.effects[-1]["color"] != game._starter_ring_color():
+	var right_slash_angle: float = float(game.effects[-1].get("angle", PI))
+	if float(game.enemies[0]["pos"].x) <= enemy_x_before or absf(right_slash_angle) > 0.1 or game._starter_weapon_name() != "疾風短刃" or game.effects[-1]["kind"] != "slash" or game.effects[-1]["color"] != game._starter_ring_color():
 		_fail("埃帕蒂的疾風短刃沒有以專屬顏色擊退異變體")
+		return
+	game.enemies.clear()
+	game._spawn_mutant("chaser")
+	game.enemies[0]["pos"] = game.player_pos + Vector2(0.0, -40.0)
+	game.enemies[0]["hp"] = 500.0
+	game.enemies[0]["max_hp"] = 500.0
+	game._fire_scythe_ring()
+	var upward_slash_angle: float = float(game.effects[-1].get("angle", 0.0))
+	if absf(upward_slash_angle + PI * 0.5) > 0.1 or absf(upward_slash_angle - right_slash_angle) < 1.0:
+		_fail("埃帕蒂的疾風短刃沒有朝最近敵人自動轉向")
 		return
 	game.enemies.clear()
 	game._toggle_build_overlay()
@@ -343,7 +377,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: rafari-name/auto-aim-slash/fireball-count/targeted-frost/automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
