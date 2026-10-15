@@ -8,7 +8,7 @@ const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.5.2"
+const VERSION := "Beta0.6.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -82,6 +82,14 @@ var skill_cooldown_remaining := 0.0
 var build_open := false
 var total_damage_dealt := 0.0
 var total_damage_taken := 0.0
+var damage_by_source := {
+	"starter": 0.0,
+	"needle": 0.0,
+	"storm": 0.0,
+	"skill": 0.0,
+	"burn": 0.0,
+	"other": 0.0,
+}
 
 var game_time := 0.0
 var spawn_timer := 0.0
@@ -681,6 +689,7 @@ func _start_game() -> void:
 	kills = 0
 	total_damage_dealt = 0.0
 	total_damage_taken = 0.0
+	damage_by_source = {"starter": 0.0, "needle": 0.0, "storm": 0.0, "skill": 0.0, "burn": 0.0, "other": 0.0}
 	instruction_time = 10.0
 	wave_index = 0
 
@@ -869,7 +878,7 @@ func _use_epathy_skill() -> void:
 		var push_direction: Vector2 = player_pos.direction_to(enemy["pos"])
 		enemy["pos"] += push_direction * (55.0 if enemy["boss"] else 135.0)
 		enemies[index] = enemy
-		_damage_enemy(index, 72.0 * damage_multiplier * close_damage_multiplier)
+		_damage_enemy(index, 72.0 * damage_multiplier * close_damage_multiplier, "skill")
 	effects.append({"kind": "slash", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius})
 
 
@@ -892,7 +901,7 @@ func _use_claire_skill() -> void:
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
 		if player_pos.distance_to(enemy["pos"]) <= radius + float(enemy["radius"]):
-			_damage_enemy(index, 55.0 * damage_multiplier)
+			_damage_enemy(index, 55.0 * damage_multiplier, "skill")
 	player_shield = minf(player_max_shield, player_shield + 12.0)
 	effects.append({"kind": "pulse", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": radius})
 
@@ -1078,7 +1087,7 @@ func _fire_scythe_ring() -> void:
 					enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), 1.4 * slow_effect_multiplier)
 					enemy["slow_factor"] = minf(float(enemy.get("slow_factor", 1.0)), 0.65 if not enemy["boss"] else 0.78)
 			enemies[index] = enemy
-			_damage_enemy(index, dealt_damage)
+			_damage_enemy(index, dealt_damage, "starter")
 	if selected_character == "claire":
 		var shield_restore := 1.2 + scythe_level * 0.35 + (3.0 if scythe_evolved else 0.0)
 		player_shield = minf(player_max_shield, player_shield + shield_restore)
@@ -1106,6 +1115,7 @@ func _fire_star_needles() -> void:
 			"pos": player_pos,
 			"velocity": direction * (660.0 + needle_level * 25.0),
 			"damage": needle_damage * damage_multiplier,
+			"source": "needle",
 			"radius": 6.0,
 			"life": 1.5,
 		})
@@ -1128,7 +1138,7 @@ func _fire_pulse_storm() -> void:
 			if enemies[enemy_index]["pos"].distance_to(position) <= storm_radius + float(enemies[enemy_index]["radius"]):
 				hit_count += 1
 		if hit_count > 0:
-			_damage_enemy(enemy_index, storm_damage * damage_multiplier * hit_count)
+			_damage_enemy(enemy_index, storm_damage * damage_multiplier * hit_count, "storm")
 
 
 func _nearest_enemy_indices(count: int) -> Array:
@@ -1151,7 +1161,7 @@ func _update_projectiles(delta: float) -> void:
 		for enemy_index in range(enemies.size() - 1, -1, -1):
 			var enemy = enemies[enemy_index]
 			if projectile["pos"].distance_to(enemy["pos"]) <= float(projectile["radius"]) + float(enemy["radius"]):
-				_damage_enemy(enemy_index, float(projectile["damage"]))
+				_damage_enemy(enemy_index, float(projectile["damage"]), String(projectile.get("source", "other")))
 				consumed = true
 				break
 		if consumed or float(projectile["life"]) <= 0.0:
@@ -1172,7 +1182,9 @@ func _update_enemy_statuses(delta: float) -> void:
 			if float(enemy["burn_tick"]) <= 0.0:
 				enemy["burn_tick"] = 0.5
 				var burn_damage: float = float(enemy.get("burn_damage", 0.0))
-				total_damage_dealt += minf(burn_damage, float(enemy["hp"]))
+				var actual_burn_damage := minf(burn_damage, float(enemy["hp"]))
+				total_damage_dealt += actual_burn_damage
+				damage_by_source["burn"] = float(damage_by_source["burn"]) + actual_burn_damage
 				enemy["hp"] = float(enemy["hp"]) - burn_damage
 				enemy["flash"] = 0.08
 				if enemy["boss"]:
@@ -1276,11 +1288,15 @@ func _update_hostile_projectiles(delta: float) -> void:
 			hostile_projectiles[index] = projectile
 
 
-func _damage_enemy(index: int, amount: float) -> void:
+func _damage_enemy(index: int, amount: float, source: String = "other") -> void:
 	if index < 0 or index >= enemies.size():
 		return
 	var enemy = enemies[index]
-	total_damage_dealt += minf(amount, float(enemy["hp"]))
+	var actual_damage := minf(amount, float(enemy["hp"]))
+	total_damage_dealt += actual_damage
+	if not damage_by_source.has(source):
+		source = "other"
+	damage_by_source[source] = float(damage_by_source[source]) + actual_damage
 	enemy["hp"] = float(enemy["hp"]) - amount
 	enemy["flash"] = 0.08
 	if enemy["boss"]:
@@ -1604,12 +1620,18 @@ func _finish_game(victory: bool) -> void:
 	end_overlay.visible = true
 	end_title.text = "使徒討伐完成" if victory else "任務失敗"
 	end_title.modulate = Color(0.45, 0.95, 1.0) if victory else Color(1.0, 0.4, 0.48)
-	end_summary.text = "生存時間　%s\n擊殺數　%d　最終等級　%d\n造成傷害　%d　承受傷害　%d\n\n%s" % [
+	end_summary.text = "生存時間　%s\n擊殺數　%d　最終等級　%d\n造成傷害　%d　承受傷害　%d\n\n傷害分布\n%s　%d｜星針　%d｜脈衝雷暴　%d\n主動戰技　%d｜燃燒　%d\n\n%s" % [
 		_format_countdown(game_time),
 		kills,
 		level,
 		int(total_damage_dealt),
 		int(total_damage_taken),
+		_starter_weapon_name(),
+		int(damage_by_source["starter"]),
+		int(damage_by_source["needle"]),
+		int(damage_by_source["storm"]),
+		int(damage_by_source["skill"]),
+		int(damage_by_source["burn"]),
 		("方舟防線暫時安全。" if victory else "重新調整強化後再次出擊。"),
 	]
 

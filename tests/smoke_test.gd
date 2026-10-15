@@ -148,7 +148,7 @@ func _run() -> void:
 	if not game.enemies.is_empty() and float(game.enemies[0]["hp"]) >= starting_hp:
 		_fail("星源鐮環沒有造成傷害")
 		return
-	if game.total_damage_dealt <= 0.0:
+	if game.total_damage_dealt <= 0.0 or float(game.damage_by_source["starter"]) <= 0.0:
 		_fail("造成傷害統計沒有累計")
 		return
 	game.player_invulnerable = 0.0
@@ -215,6 +215,9 @@ func _run() -> void:
 	if not game.enemies.is_empty() and float(game.enemies[-1]["hp"]) >= storm_target_hp:
 		_fail("脈衝雷暴沒有造成傷害")
 		return
+	if float(game.damage_by_source["storm"]) <= 0.0:
+		_fail("脈衝雷暴傷害沒有列入來源統計")
+		return
 
 	get_tree().paused = false
 	game._spawn_apostle()
@@ -230,8 +233,11 @@ func _run() -> void:
 	if not game.game_over or game.apostle_present:
 		_fail("使徒討伐結算沒有觸發")
 		return
+	if not "傷害分布" in game.end_summary.text or not game._starter_weapon_name() in game.end_summary.text:
+		_fail("結算畫面沒有顯示分來源傷害")
+		return
 
-	print("SMOKE_TEST_PASS: character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
