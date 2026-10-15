@@ -6,7 +6,7 @@ config_version=5
 
 config/name="星隕倖存者"
 config/description="《星隕計畫 Ark Re:Code》非官方生存 Roguelite 同人原型"
-config/version="Beta0.8.2"
+config/version="Beta0.9.1"
 run/main_scene="res://scenes/main.tscn"
 
 [display]

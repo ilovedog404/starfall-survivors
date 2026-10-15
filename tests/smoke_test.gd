@@ -226,6 +226,20 @@ func _run() -> void:
 	if game.needle_level < 1:
 		_fail("星針升級沒有套用")
 		return
+	var old_scythe_interval: float = game.scythe_interval
+	var old_skill_cooldown_multiplier: float = game.skill_cooldown_multiplier
+	game.pending_levels = 1
+	game._select_upgrade("cooldown")
+	if game.scythe_interval >= old_scythe_interval or game.skill_cooldown_multiplier >= old_skill_cooldown_multiplier:
+		_fail("冷卻模組沒有縮短武器或戰技冷卻")
+		return
+	var old_scythe_radius_for_area: float = game.scythe_radius
+	var old_storm_radius_for_area: float = game.storm_radius
+	game.pending_levels = 1
+	game._select_upgrade("area")
+	if game.scythe_radius <= old_scythe_radius_for_area or game.storm_radius <= old_storm_radius_for_area:
+		_fail("廣域線圈沒有提高環域或雷暴範圍")
+		return
 	game.scythe_level = 5
 	game.meta_levels["armor"] = 3
 	for option in game._available_upgrades():
@@ -277,7 +291,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

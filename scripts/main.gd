@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.8.2"
+const VERSION := "Beta0.9.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -82,6 +82,7 @@ var slow_effect_multiplier := 1.0
 var selected_character := "claire"
 var run_started := false
 var skill_cooldown_remaining := 0.0
+var skill_cooldown_multiplier := 1.0
 var build_open := false
 var total_damage_dealt := 0.0
 var total_damage_taken := 0.0
@@ -113,6 +114,8 @@ var meta_levels := {
 	"pickup": 0,
 	"armor": 0,
 	"damage": 0,
+	"cooldown": 0,
+	"area": 0,
 }
 
 var scythe_level := 1
@@ -711,6 +714,7 @@ func _start_game() -> void:
 	burn_duration_multiplier = 1.0
 	slow_effect_multiplier = 1.0
 	skill_cooldown_remaining = 0.0
+	skill_cooldown_multiplier = 1.0
 	match selected_character:
 		"epathy":
 			player_armor = 3.0
@@ -723,7 +727,7 @@ func _start_game() -> void:
 	level = 1
 	experience = 0.0
 	experience_required = 12.0
-	meta_levels = {"health": 0, "speed": 0, "pickup": 0, "armor": 0, "damage": 0}
+	meta_levels = {"health": 0, "speed": 0, "pickup": 0, "armor": 0, "damage": 0, "cooldown": 0, "area": 0}
 
 	scythe_level = 1
 	scythe_damage = 24.0
@@ -809,7 +813,7 @@ func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
 	var starter_name := _starter_weapon_name()
 	var evolution_text := "進化條件：星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3" if selected_character == "claire" else "專屬環域：%s" % _starter_weapon_trait_text()
-	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5\n\n%s\n重抽剩餘　%d" % [
+	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5\n\n%s\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
 		character_data["passive"],
@@ -821,6 +825,8 @@ func _update_build_text() -> void:
 		int(meta_levels["pickup"]),
 		int(meta_levels["armor"]),
 		int(meta_levels["damage"]),
+		int(meta_levels["cooldown"]),
+		int(meta_levels["area"]),
 		evolution_text,
 		rerolls_remaining,
 	]
@@ -869,7 +875,7 @@ func _use_character_skill() -> bool:
 		"lucia": _use_lucia_skill()
 		"claire": _use_claire_skill()
 		"rafari": _use_rafari_skill()
-	skill_cooldown_remaining = float(CHARACTERS[selected_character]["skill_cooldown"])
+	skill_cooldown_remaining = float(CHARACTERS[selected_character]["skill_cooldown"]) * skill_cooldown_multiplier
 	return true
 
 
@@ -1504,6 +1510,10 @@ func _available_upgrades() -> Array:
 		result.append({"id": "armor", "name": "強化裝甲 Lv.%d" % (int(meta_levels["armor"]) + 1), "description": "護甲 +1，降低每次受到的傷害"})
 	if int(meta_levels["damage"]) < 5:
 		result.append({"id": "damage", "name": "星源增幅 Lv.%d" % (int(meta_levels["damage"]) + 1), "description": "所有武器傷害提高 12%"})
+	if int(meta_levels["cooldown"]) < 5:
+		result.append({"id": "cooldown", "name": "冷卻模組 Lv.%d" % (int(meta_levels["cooldown"]) + 1), "description": "武器與主動戰技冷卻縮短 6%"})
+	if int(meta_levels["area"]) < 5:
+		result.append({"id": "area", "name": "廣域線圈 Lv.%d" % (int(meta_levels["area"]) + 1), "description": "環域半徑 +12，雷暴半徑 +7"})
 	return result
 
 
@@ -1582,6 +1592,16 @@ func _select_upgrade(upgrade_id: String) -> void:
 		"damage":
 			meta_levels["damage"] = int(meta_levels["damage"]) + 1
 			damage_multiplier *= 1.12
+		"cooldown":
+			meta_levels["cooldown"] = int(meta_levels["cooldown"]) + 1
+			scythe_interval *= 0.94
+			needle_interval *= 0.94
+			storm_interval *= 0.94
+			skill_cooldown_multiplier *= 0.94
+		"area":
+			meta_levels["area"] = int(meta_levels["area"]) + 1
+			scythe_radius += 12.0
+			storm_radius += 7.0
 
 	pending_levels = maxi(0, pending_levels - 1)
 	if pending_levels > 0:
