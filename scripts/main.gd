@@ -8,7 +8,7 @@ const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.4.2"
+const VERSION := "Beta0.5.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -114,6 +114,7 @@ var enemies: Array = []
 var projectiles: Array = []
 var hostile_projectiles: Array = []
 var gems: Array = []
+var repair_cores: Array = []
 var effects: Array = []
 var apostle_spawned := false
 var apostle_present := false
@@ -177,6 +178,7 @@ func _process(delta: float) -> void:
 	_update_enemies(delta)
 	_update_hostile_projectiles(delta)
 	_update_gems(delta)
+	_update_repair_cores(delta)
 	_update_effects(delta)
 	_update_interface(delta)
 	queue_redraw()
@@ -715,6 +717,7 @@ func _start_game() -> void:
 	projectiles.clear()
 	hostile_projectiles.clear()
 	gems.clear()
+	repair_cores.clear()
 	effects.clear()
 	apostle_spawned = false
 	apostle_present = false
@@ -1284,6 +1287,8 @@ func _kill_enemy(index: int) -> void:
 	var gem_value := 8.0 if enemy["elite"] else 1.0
 	if not was_boss:
 		gems.append({"pos": enemy["pos"], "value": gem_value})
+		if enemy["elite"]:
+			repair_cores.append({"pos": enemy["pos"], "heal": 24.0})
 	kills += 1
 	effects.append({"kind": "burst", "pos": enemy["pos"], "life": 0.24, "total": 0.24, "radius": float(enemy["radius"]) * 2.2})
 	enemies.remove_at(index)
@@ -1322,6 +1327,28 @@ func _update_gems(delta: float) -> void:
 			gems.remove_at(index)
 		else:
 			gems[index] = gem
+
+
+func _update_repair_cores(delta: float) -> void:
+	for index in range(repair_cores.size() - 1, -1, -1):
+		var core = repair_cores[index]
+		var distance: float = core["pos"].distance_to(player_pos)
+		if distance <= pickup_radius * 1.5:
+			var pull_speed := 210.0 + maxf(0.0, pickup_radius * 1.5 - distance) * 3.2
+			core["pos"] += core["pos"].direction_to(player_pos) * pull_speed * delta
+		if core["pos"].distance_to(player_pos) <= 27.0:
+			var missing_health := maxf(0.0, player_max_health - player_health)
+			var restored := minf(float(core["heal"]), missing_health)
+			player_health += restored
+			if restored <= 0.0:
+				player_shield = minf(player_max_shield, player_shield + 8.0)
+			instruction_label.text = "修復核心：%s" % ("護盾 +8" if restored <= 0.0 else "生命 +%d" % int(restored))
+			instruction_label.visible = true
+			instruction_time = 2.0
+			effects.append({"kind": "repair", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": 72.0})
+			repair_cores.remove_at(index)
+		else:
+			repair_cores[index] = core
 
 
 func _gain_experience(amount: float) -> void:
@@ -1589,6 +1616,13 @@ func _draw() -> void:
 		])
 		draw_colored_polygon(points, Color(0.26, 0.95, 1.0))
 
+	for core in repair_cores:
+		var core_pos: Vector2 = core["pos"]
+		draw_circle(core_pos, 13.0, Color(0.14, 0.95, 0.62, 0.22))
+		draw_arc(core_pos, 12.0, 0.0, TAU, 24, Color(0.35, 1.0, 0.72), 3.0, true)
+		draw_rect(Rect2(core_pos + Vector2(-3.0, -8.0), Vector2(6.0, 16.0)), Color(0.7, 1.0, 0.86))
+		draw_rect(Rect2(core_pos + Vector2(-8.0, -3.0), Vector2(16.0, 6.0)), Color(0.7, 1.0, 0.86))
+
 	for projectile in projectiles:
 		var direction: Vector2 = projectile["velocity"].normalized()
 		draw_line(projectile["pos"] - direction * 10.0, projectile["pos"] + direction * 7.0, Color(0.5, 0.95, 1.0), 5.0, true)
@@ -1719,6 +1753,9 @@ func _draw_effect(effect: Dictionary) -> void:
 		"ice":
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(0.3, 0.65, 1.0, alpha * 0.14))
 			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 64, Color(0.55, 0.85, 1.0, alpha), 8.0, true)
+		"repair":
+			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(0.2, 1.0, 0.62, alpha * 0.18))
+			draw_arc(effect["pos"], float(effect["radius"]) * (0.45 + progress * 0.55), 0.0, TAU, 40, Color(0.48, 1.0, 0.76, alpha), 6.0, true)
 		"storm":
 			var strike_top: Vector2 = effect["pos"] + Vector2(0.0, -220.0)
 			draw_line(strike_top, effect["pos"], Color(0.72, 0.92, 1.0, alpha), 9.0, true)

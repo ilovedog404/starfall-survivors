@@ -47,6 +47,7 @@ func _run() -> void:
 		game._update_enemies(delta)
 		game._update_hostile_projectiles(delta)
 		game._update_gems(delta)
+		game._update_repair_cores(delta)
 		game._update_effects(delta)
 
 	if game.wave_index != 3:

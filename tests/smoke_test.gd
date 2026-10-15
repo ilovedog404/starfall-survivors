@@ -153,6 +153,20 @@ func _run() -> void:
 	if game.total_damage_taken <= 0.0:
 		_fail("承受傷害統計沒有累計")
 		return
+	game.enemies.clear()
+	game.player_health = 50.0
+	game._spawn_mutant("chaser")
+	game.enemies[0]["elite"] = true
+	game.enemies[0]["pos"] = game.player_pos
+	game.enemies[0]["hp"] = 1.0
+	game._damage_enemy(0, 10.0)
+	if game.repair_cores.is_empty():
+		_fail("精英異變體沒有掉落修復核心")
+		return
+	game._update_repair_cores(0.1)
+	if game.player_health <= 50.0 or not game.repair_cores.is_empty():
+		_fail("修復核心沒有正確回復生命")
+		return
 
 	game._gain_experience(100.0)
 	if not game.choosing_upgrade or not game.upgrade_overlay.visible:
@@ -214,7 +228,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-starters/skills/pause-menu/build/evolution/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: character-starters/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
