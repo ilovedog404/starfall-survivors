@@ -8,7 +8,7 @@ const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.4.1"
+const VERSION := "Beta0.4.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -776,11 +776,13 @@ func _toggle_build_overlay() -> void:
 
 func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
-	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5\n\n進化條件：星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3\n重抽剩餘　%d" % [
+	var starter_name := _starter_weapon_name()
+	var evolution_text := "進化條件：星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3" if selected_character == "claire" else "專屬環域：%s" % _starter_weapon_trait_text()
+	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5\n\n%s\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
 		character_data["passive"],
-		("崩星護界　已進化" if scythe_evolved else "星源鐮環　Lv.%d / 5" % scythe_level),
+		("崩星護界　已進化" if scythe_evolved else "%s　Lv.%d / 5" % [starter_name, scythe_level]),
 		("未取得" if needle_level == 0 else "Lv.%d / 5" % needle_level),
 		("未取得" if storm_level == 0 else "Lv.%d / 5" % storm_level),
 		int(meta_levels["health"]),
@@ -788,8 +790,25 @@ func _update_build_text() -> void:
 		int(meta_levels["pickup"]),
 		int(meta_levels["armor"]),
 		int(meta_levels["damage"]),
+		evolution_text,
 		rerolls_remaining,
 	]
+
+
+func _starter_weapon_name() -> String:
+	match selected_character:
+		"epathy": return "近衛刀輪"
+		"lucia": return "灼星法環"
+		"rafari": return "零度環域"
+	return "星源鐮環"
+
+
+func _starter_weapon_trait_text() -> String:
+	match selected_character:
+		"epathy": return "命中時擊退異變體"
+		"lucia": return "命中時附加短暫燃燒"
+		"rafari": return "命中時附加短暫冰緩"
+	return "命中時回復護盾"
 
 
 func _handle_upgrade_input() -> void:
@@ -1033,9 +1052,22 @@ func _fire_scythe_ring() -> void:
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
 		if player_pos.distance_to(enemy["pos"]) <= scythe_radius + float(enemy["radius"]):
+			match selected_character:
+				"epathy":
+					var push_direction: Vector2 = player_pos.direction_to(enemy["pos"])
+					enemy["pos"] += push_direction * (10.0 if enemy["boss"] else 32.0)
+				"lucia":
+					enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), 1.8 * burn_duration_multiplier)
+					enemy["burn_tick"] = 0.0
+					enemy["burn_damage"] = maxf(float(enemy.get("burn_damage", 0.0)), 6.0 * damage_multiplier)
+				"rafari":
+					enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), 1.4 * slow_effect_multiplier)
+					enemy["slow_factor"] = minf(float(enemy.get("slow_factor", 1.0)), 0.65 if not enemy["boss"] else 0.78)
+			enemies[index] = enemy
 			_damage_enemy(index, dealt_damage)
-	var shield_restore := 1.2 + scythe_level * 0.35 + (3.0 if scythe_evolved else 0.0)
-	player_shield = minf(player_max_shield, player_shield + shield_restore)
+	if selected_character == "claire":
+		var shield_restore := 1.2 + scythe_level * 0.35 + (3.0 if scythe_evolved else 0.0)
+		player_shield = minf(player_max_shield, player_shield + shield_restore)
 	effects.append({
 		"kind": "ring",
 		"pos": player_pos,
@@ -1344,10 +1376,10 @@ func _available_upgrades() -> Array:
 	if scythe_level < 5:
 		result.append({
 			"id": "scythe",
-			"name": "星源鐮環 Lv.%d" % (scythe_level + 1),
+			"name": "%s Lv.%d" % [_starter_weapon_name(), scythe_level + 1],
 			"description": _scythe_upgrade_description(scythe_level + 1),
 		})
-	elif int(meta_levels["armor"]) >= 3 and not scythe_evolved:
+	elif selected_character == "claire" and int(meta_levels["armor"]) >= 3 and not scythe_evolved:
 		result.append({
 			"id": "scythe_evolution",
 			"name": "進化：崩星護界",
@@ -1384,7 +1416,7 @@ func _scythe_upgrade_description(next_level: int) -> String:
 		3: return "鐮環半徑 +34"
 		4: return "攻擊間隔縮短 20%"
 		5: return "超載：傷害提高並強化護盾回復"
-	return "強化星源鐮環"
+	return "強化%s" % _starter_weapon_name()
 
 
 func _needle_upgrade_description(next_level: int) -> String:
@@ -1419,7 +1451,7 @@ func _select_upgrade(upgrade_id: String) -> void:
 					scythe_damage += 14.0
 					player_max_shield += 8.0
 		"scythe_evolution":
-			if scythe_level >= 5 and int(meta_levels["armor"]) >= 3 and not scythe_evolved:
+			if selected_character == "claire" and scythe_level >= 5 and int(meta_levels["armor"]) >= 3 and not scythe_evolved:
 				scythe_evolved = true
 				scythe_radius += 36.0
 				scythe_interval *= 0.82
@@ -1491,7 +1523,7 @@ func _update_interface(delta: float) -> void:
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
 	weapon_label.text = "%s\n星針 %s｜脈衝雷暴 %s" % [
-		("崩星護界｜進化" if scythe_evolved else "星源鐮環 Lv.%d%s" % [scythe_level, ("｜超載" if scythe_level >= 5 else "")]),
+		("崩星護界｜進化" if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜超載" if scythe_level >= 5 else "")]),
 		("未取得" if needle_level == 0 else "Lv.%d" % needle_level),
 		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
 	]

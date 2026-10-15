@@ -25,6 +25,13 @@ func _run() -> void:
 	game._choose_character("lucia")
 	game._start_game()
 	game._spawn_mutant("chaser")
+	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
+	game.enemies[0]["hp"] = 500.0
+	game.enemies[0]["max_hp"] = 500.0
+	game._fire_scythe_ring()
+	if float(game.enemies[0]["burn_time"]) <= 0.0 or game._starter_weapon_name() != "灼星法環":
+		_fail("璐茜婭的灼星法環沒有附加燃燒")
+		return
 	game.enemies[0]["hp"] = float(game.enemies[0]["max_hp"]) - 1.0
 	if not game._use_character_skill() or float(game.enemies[0]["burn_time"]) <= 4.0:
 		_fail("璐茜婭的全畫面引燃沒有套用")
@@ -35,6 +42,12 @@ func _run() -> void:
 	game._start_game()
 	game._spawn_mutant("chaser")
 	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
+	game.enemies[0]["hp"] = 500.0
+	game.enemies[0]["max_hp"] = 500.0
+	game._fire_scythe_ring()
+	if float(game.enemies[0]["slow_factor"]) >= 1.0 or game._starter_weapon_name() != "零度環域":
+		_fail("菈法瑞的零度環域沒有附加冰緩")
+		return
 	if not game._use_character_skill() or float(game.enemies[0]["slow_factor"]) != 0.0:
 		_fail("菈法瑞的凍結沒有套用")
 		return
@@ -42,6 +55,11 @@ func _run() -> void:
 	game._show_character_select()
 	game._choose_character("claire")
 	game._start_game()
+	game.player_shield = 0.0
+	game._fire_scythe_ring()
+	if game.player_shield <= 0.0 or game._starter_weapon_name() != "星源鐮環":
+		_fail("克萊兒的星源鐮環沒有回復護盾")
+		return
 	game.player_shield = 0.0
 	if not game._use_character_skill() or game.player_shield <= 0.0:
 		_fail("克萊兒的鐮環過載沒有回復護盾")
@@ -53,8 +71,18 @@ func _run() -> void:
 	if game.player_armor != 3.0 or game.close_damage_multiplier <= 1.0:
 		_fail("埃帕蒂的初始被動沒有套用")
 		return
+	game._spawn_mutant("chaser")
+	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
+	game.enemies[0]["hp"] = 500.0
+	game.enemies[0]["max_hp"] = 500.0
+	var enemy_x_before: float = game.enemies[0]["pos"].x
+	game._fire_scythe_ring()
+	if float(game.enemies[0]["pos"].x) <= enemy_x_before or game._starter_weapon_name() != "近衛刀輪":
+		_fail("埃帕蒂的近衛刀輪沒有擊退異變體")
+		return
+	game.enemies.clear()
 	game._toggle_build_overlay()
-	if not game.build_open or not game.build_overlay.visible or not "星源鐮環" in game.build_text.text:
+	if not game.build_open or not game.build_overlay.visible or not "近衛刀輪" in game.build_text.text:
 		_fail("當前建構面板沒有正確開啟")
 		return
 	game._toggle_build_overlay()
@@ -143,6 +171,11 @@ func _run() -> void:
 		return
 	game.scythe_level = 5
 	game.meta_levels["armor"] = 3
+	for option in game._available_upgrades():
+		if option["id"] == "scythe_evolution":
+			_fail("非克萊兒角色不應取得崩星護界進化")
+			return
+	game.selected_character = "claire"
 	var evolution_found := false
 	for option in game._available_upgrades():
 		if option["id"] == "scythe_evolution":
@@ -181,7 +214,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-select/pause-menu/build/evolution/enemy-types/waves/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: character-starters/skills/pause-menu/build/evolution/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
