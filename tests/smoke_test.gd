@@ -22,6 +22,9 @@ func _run() -> void:
 		if game.selected_character != character_id:
 			_fail("無法選擇角色：" + character_id)
 			return
+		if not game._starter_weapon_name() in game.character_detail.text or not String(game.CHARACTERS[character_id]["skill_name"]) in game.character_detail.text:
+			_fail("角色選擇頁沒有顯示專屬武器或戰技：" + character_id)
+			return
 	game._choose_character("lucia")
 	game._start_game()
 	game._spawn_mutant("chaser")
@@ -29,7 +32,7 @@ func _run() -> void:
 	game.enemies[0]["hp"] = 500.0
 	game.enemies[0]["max_hp"] = 500.0
 	game._fire_scythe_ring()
-	if float(game.enemies[0]["burn_time"]) <= 0.0 or game._starter_weapon_name() != "灼星法環":
+	if float(game.enemies[0]["burn_time"]) <= 0.0 or game._starter_weapon_name() != "灼星法環" or game.effects[-1]["color"] != game._starter_ring_color():
 		_fail("璐茜婭的灼星法環沒有附加燃燒")
 		return
 	game.enemies[0]["hp"] = float(game.enemies[0]["max_hp"]) - 1.0
@@ -228,7 +231,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-starters/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

@@ -8,7 +8,7 @@ const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.5.1"
+const VERSION := "Beta0.5.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -17,6 +17,9 @@ const CHARACTERS := {
 		"skill": "主動戰技：用刀攻擊並擊退周圍敵人",
 		"skill_name": "環刃震退",
 		"skill_cooldown": 9.0,
+		"starter_weapon": "近衛刀輪",
+		"starter_trait": "命中時擊退異變體",
+		"ring_color": Color(1.0, 0.38, 0.48),
 		"color": Color(1.0, 0.48, 0.55),
 	},
 	"lucia": {
@@ -26,6 +29,9 @@ const CHARACTERS := {
 		"skill": "主動戰技：點燃全畫面已受傷敵人",
 		"skill_name": "灼星引燃",
 		"skill_cooldown": 13.0,
+		"starter_weapon": "灼星法環",
+		"starter_trait": "命中時附加短暫燃燒",
+		"ring_color": Color(1.0, 0.42, 0.16),
 		"color": Color(0.92, 0.45, 1.0),
 	},
 	"claire": {
@@ -35,6 +41,9 @@ const CHARACTERS := {
 		"skill": "範圍傷害與護盾兼備，適合第一次遊玩",
 		"skill_name": "鐮環過載",
 		"skill_cooldown": 11.0,
+		"starter_weapon": "星源鐮環",
+		"starter_trait": "發動時回復護盾",
+		"ring_color": Color(0.25, 0.9, 1.0),
 		"color": Color(0.6, 0.92, 1.0),
 	},
 	"rafari": {
@@ -44,6 +53,9 @@ const CHARACTERS := {
 		"skill": "主動戰技：凍結普通敵人，首領大幅減速",
 		"skill_name": "零度封鎖",
 		"skill_cooldown": 14.0,
+		"starter_weapon": "零度環域",
+		"starter_trait": "命中時附加短暫冰緩",
+		"ring_color": Color(0.42, 0.62, 1.0),
 		"color": Color(0.55, 0.72, 1.0),
 	},
 }
@@ -591,16 +603,16 @@ func _build_character_overlay() -> void:
 		var data: Dictionary = CHARACTERS[character_id]
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(268.0, 250.0)
-		button.text = "%s\n\n%s\n\n%s" % [data["name"], data["role"], data["passive"]]
+		button.text = "%s\n%s\n\n%s\n\n起始｜%s\n戰技｜%s" % [data["name"], data["role"], data["passive"], data["starter_weapon"], data["skill_name"]]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.add_theme_font_size_override("font_size", 18)
+		button.add_theme_font_size_override("font_size", 16)
 		button.process_mode = Node.PROCESS_MODE_ALWAYS
 		button.pressed.connect(_choose_character.bind(character_id))
 		cards.add_child(button)
 		character_buttons[character_id] = button
 
 	character_detail = Label.new()
-	character_detail.custom_minimum_size = Vector2(0.0, 58.0)
+	character_detail.custom_minimum_size = Vector2(0.0, 82.0)
 	character_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	character_detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	character_detail.add_theme_font_size_override("font_size", 18)
@@ -629,7 +641,10 @@ func _choose_character(character_id: String) -> void:
 		return
 	selected_character = character_id
 	var data: Dictionary = CHARACTERS[selected_character]
-	character_detail.text = "%s｜%s\n%s" % [data["name"], data["role"], data["skill"]]
+	character_detail.text = "%s｜%s\n起始｜%s：%s\n空白鍵｜%s（%.0f 秒）：%s" % [
+		data["name"], data["role"], data["starter_weapon"], data["starter_trait"],
+		data["skill_name"], data["skill_cooldown"], data["skill"],
+	]
 	for button_id in character_buttons:
 		var button: Button = character_buttons[button_id]
 		button.modulate = Color.WHITE if button_id == selected_character else Color(0.62, 0.66, 0.75)
@@ -799,19 +814,15 @@ func _update_build_text() -> void:
 
 
 func _starter_weapon_name() -> String:
-	match selected_character:
-		"epathy": return "近衛刀輪"
-		"lucia": return "灼星法環"
-		"rafari": return "零度環域"
-	return "星源鐮環"
+	return String(CHARACTERS[selected_character]["starter_weapon"])
 
 
 func _starter_weapon_trait_text() -> String:
-	match selected_character:
-		"epathy": return "命中時擊退異變體"
-		"lucia": return "命中時附加短暫燃燒"
-		"rafari": return "命中時附加短暫冰緩"
-	return "命中時回復護盾"
+	return String(CHARACTERS[selected_character]["starter_trait"])
+
+
+func _starter_ring_color() -> Color:
+	return CHARACTERS[selected_character]["ring_color"]
 
 
 func _handle_upgrade_input() -> void:
@@ -1077,6 +1088,7 @@ func _fire_scythe_ring() -> void:
 		"life": 0.42,
 		"total": 0.42,
 		"radius": scythe_radius,
+		"color": _starter_ring_color(),
 	})
 
 
@@ -1733,8 +1745,9 @@ func _draw_effect(effect: Dictionary) -> void:
 	match effect["kind"]:
 		"ring":
 			var radius := lerpf(32.0, float(effect["radius"]), progress)
-			draw_arc(effect["pos"], radius, 0.0, TAU, 64, Color(0.25, 0.9, 1.0, alpha), 8.0, true)
-			draw_arc(effect["pos"], radius * 0.82, -0.4, 3.8, 48, Color(0.78, 0.96, 1.0, alpha * 0.85), 4.0, true)
+			var ring_color: Color = effect.get("color", Color(0.25, 0.9, 1.0))
+			draw_arc(effect["pos"], radius, 0.0, TAU, 64, Color(ring_color, alpha), 8.0, true)
+			draw_arc(effect["pos"], radius * 0.82, -0.4, 3.8, 48, Color(ring_color.lightened(0.45), alpha * 0.85), 4.0, true)
 			if scythe_evolved:
 				draw_arc(effect["pos"], radius * 0.66, 0.8, 5.7, 52, Color(0.95, 0.78, 1.0, alpha), 6.0, true)
 		"burst":
@@ -1773,4 +1786,4 @@ func _draw_player() -> void:
 		var shield_alpha := 0.22 + 0.38 * (player_shield / player_max_shield)
 		draw_arc(player_pos, 30.0, 0.0, TAU, 36, Color(0.3, 0.78, 1.0, shield_alpha), 3.0, true)
 	if scythe_timer < 0.22:
-		draw_arc(player_pos, scythe_radius, 0.0, TAU, 48, Color(0.2, 0.7, 0.9, 0.12), 2.0)
+		draw_arc(player_pos, scythe_radius, 0.0, TAU, 48, Color(_starter_ring_color(), 0.15), 2.0)
