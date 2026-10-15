@@ -26,7 +26,7 @@ func _run() -> void:
 			_fail("無法選擇角色：" + character_id)
 			return
 		if not game._starter_weapon_name() in game.character_detail.text or not String(game.CHARACTERS[character_id]["skill_name"]) in game.character_detail.text:
-			_fail("角色選擇頁沒有顯示專屬武器或戰技：" + character_id)
+			_fail("角色選擇頁沒有顯示專屬自動能力：" + character_id)
 			return
 	game._choose_character("lucia")
 	game._start_game()
@@ -35,12 +35,8 @@ func _run() -> void:
 	game.enemies[0]["hp"] = 500.0
 	game.enemies[0]["max_hp"] = 500.0
 	game._fire_scythe_ring()
-	if float(game.enemies[0]["burn_time"]) <= 0.0 or game._starter_weapon_name() != "灼星法環" or game.effects[-1]["color"] != game._starter_ring_color():
-		_fail("璐茜婭的灼星法環沒有附加燃燒")
-		return
-	game.enemies[0]["hp"] = float(game.enemies[0]["max_hp"]) - 1.0
-	if not game._use_character_skill() or float(game.enemies[0]["burn_time"]) <= 4.0:
-		_fail("璐茜婭的全畫面引燃沒有套用")
+	if float(game.enemies[0]["burn_time"]) <= 0.0 or game._starter_weapon_name() != "緋色脈衝" or game.effects[-1]["kind"] != "fire" or game.effects[-1]["color"] != game._starter_ring_color():
+		_fail("璐茜婭的緋色脈衝沒有以專屬顏色附加燃燒")
 		return
 
 	game._show_character_select()
@@ -51,11 +47,8 @@ func _run() -> void:
 	game.enemies[0]["hp"] = 500.0
 	game.enemies[0]["max_hp"] = 500.0
 	game._fire_scythe_ring()
-	if float(game.enemies[0]["slow_factor"]) >= 1.0 or game._starter_weapon_name() != "零度環域":
-		_fail("菈法瑞的零度環域沒有附加冰緩")
-		return
-	if not game._use_character_skill() or float(game.enemies[0]["slow_factor"]) != 0.0:
-		_fail("菈法瑞的凍結沒有套用")
+	if float(game.enemies[0]["slow_factor"]) >= 1.0 or game._starter_weapon_name() != "零度領域" or game.effects[-1]["kind"] != "ice" or game.effects[-1]["color"] != game._starter_ring_color():
+		_fail("菈法瑞的零度領域沒有以專屬顏色附加冰緩")
 		return
 
 	game._show_character_select()
@@ -63,12 +56,8 @@ func _run() -> void:
 	game._start_game()
 	game.player_shield = 0.0
 	game._fire_scythe_ring()
-	if game.player_shield <= 0.0 or game._starter_weapon_name() != "星源鐮環":
+	if game.player_shield <= 0.0 or game._starter_weapon_name() != "星源鐮環" or game.effects[-1]["kind"] != "pulse" or game.effects[-1]["color"] != game._starter_ring_color():
 		_fail("克萊兒的星源鐮環沒有回復護盾")
-		return
-	game.player_shield = 0.0
-	if not game._use_character_skill() or game.player_shield <= 0.0:
-		_fail("克萊兒的鐮環過載沒有回復護盾")
 		return
 
 	game._show_character_select()
@@ -83,12 +72,12 @@ func _run() -> void:
 	game.enemies[0]["max_hp"] = 500.0
 	var enemy_x_before: float = game.enemies[0]["pos"].x
 	game._fire_scythe_ring()
-	if float(game.enemies[0]["pos"].x) <= enemy_x_before or game._starter_weapon_name() != "近衛刀輪":
-		_fail("埃帕蒂的近衛刀輪沒有擊退異變體")
+	if float(game.enemies[0]["pos"].x) <= enemy_x_before or game._starter_weapon_name() != "疾風短刃" or game.effects[-1]["kind"] != "slash" or game.effects[-1]["color"] != game._starter_ring_color():
+		_fail("埃帕蒂的疾風短刃沒有以專屬顏色擊退異變體")
 		return
 	game.enemies.clear()
 	game._toggle_build_overlay()
-	if not game.build_open or not game.build_overlay.visible or not "近衛刀輪" in game.build_text.text:
+	if not game.build_open or not game.build_overlay.visible or not "疾風短刃" in game.build_text.text:
 		_fail("當前建構面板沒有正確開啟")
 		return
 	game._toggle_build_overlay()
@@ -150,8 +139,9 @@ func _run() -> void:
 	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
 	game.enemies[0]["hp"] = 200.0
 	game.enemies[0]["max_hp"] = 200.0
-	if not game._use_character_skill() or float(game.enemies[0]["hp"]) >= 200.0:
-		_fail("埃帕蒂的環刃震退沒有造成傷害")
+	game._fire_scythe_ring()
+	if float(game.enemies[0]["hp"]) >= 200.0:
+		_fail("埃帕蒂的疾風短刃沒有造成傷害")
 		return
 	game._start_game()
 
@@ -186,7 +176,7 @@ func _run() -> void:
 	var starting_hp: float = game.enemies[0]["hp"]
 	game._fire_scythe_ring()
 	if not game.enemies.is_empty() and float(game.enemies[0]["hp"]) >= starting_hp:
-		_fail("星源鐮環沒有造成傷害")
+		_fail("角色自動能力沒有造成傷害")
 		return
 	if game.total_damage_dealt <= 0.0 or float(game.damage_by_source["starter"]) <= 0.0:
 		_fail("造成傷害統計沒有累計")
@@ -249,11 +239,11 @@ func _run() -> void:
 		_fail("星針升級沒有套用")
 		return
 	var old_scythe_interval: float = game.scythe_interval
-	var old_skill_cooldown_multiplier: float = game.skill_cooldown_multiplier
+	var old_needle_interval_cooldown: float = game.needle_interval
 	game.pending_levels = 1
 	game._select_upgrade("cooldown")
-	if game.scythe_interval >= old_scythe_interval or game.skill_cooldown_multiplier >= old_skill_cooldown_multiplier:
-		_fail("冷卻模組沒有縮短武器或戰技冷卻")
+	if game.scythe_interval >= old_scythe_interval or game.needle_interval >= old_needle_interval_cooldown:
+		_fail("冷卻模組沒有縮短自動武器冷卻")
 		return
 	var old_scythe_radius_for_area: float = game.scythe_radius
 	var old_storm_radius_for_area: float = game.storm_radius
@@ -333,6 +323,18 @@ func _run() -> void:
 	if boss_index < 0:
 		_fail("使徒沒有生成")
 		return
+	game.enemies[boss_index]["attack_cooldown"] = 0.0
+	game._update_enemies(0.01)
+	if float(game.enemies[boss_index].get("burst_charge", 0.0)) <= 0.0:
+		_fail("使徒環形彈幕沒有進入蓄力預警")
+		return
+	if not game.hostile_projectiles.is_empty():
+		_fail("使徒環形彈幕在預警完成前提前發射")
+		return
+	game._update_enemies(0.9)
+	if game.hostile_projectiles.size() != 12:
+		_fail("使徒環形彈幕預警後沒有發射 12 枚彈體")
+		return
 	game._damage_enemy(boss_index, 999999.0)
 	if not game.game_over or game.apostle_present:
 		_fail("使徒討伐結算沒有觸發")
@@ -341,7 +343,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

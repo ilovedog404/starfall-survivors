@@ -36,10 +36,6 @@ func _run() -> void:
 			game._select_upgrade(choices[0]["id"])
 		game.player_pos += Vector2.from_angle(float(step) * 0.013) * 1.8
 		game.camera.position = game.player_pos
-		game.skill_cooldown_remaining = maxf(0.0, game.skill_cooldown_remaining - delta)
-		if step % 240 == 0:
-			game.skill_cooldown_remaining = 0.0
-			game._use_character_skill()
 		game._update_spawning(delta)
 		game._update_weapons(delta)
 		game._update_projectiles(delta)

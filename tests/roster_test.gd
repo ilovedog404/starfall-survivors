@@ -14,6 +14,7 @@ func _run() -> void:
 
 	var summaries: Array[String] = []
 	var character_ids := ["epathy", "lucia", "claire", "rafari"]
+	var expected_effects := {"epathy": "slash", "lucia": "fire", "claire": "pulse", "rafari": "ice"}
 	for character_index in character_ids.size():
 		var character_id: String = character_ids[character_index]
 		var game = packed_scene.instantiate()
@@ -26,8 +27,20 @@ func _run() -> void:
 		game.player_health = game.player_max_health
 		game.player_armor += 24.0
 		game.damage_multiplier = 1.45
+		game._spawn_mutant("chaser")
+		game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
+		game.enemies[0]["hp"] = 500.0
+		game.enemies[0]["max_hp"] = 500.0
+		game._fire_scythe_ring()
+		if game.effects.is_empty() or game.effects[-1]["kind"] != expected_effects[character_id]:
+			_fail("%s 沒有使用企劃書指定的自動能力表現" % character_id)
+			return
+		if game.effects[-1].get("color", Color.BLACK) != game._starter_ring_color():
+			_fail("%s 的自動能力沒有使用角色專屬色" % character_id)
+			return
+		game.enemies.clear()
+		game.effects.clear()
 
-		var skill_uses := 0
 		var delta := 1.0 / 30.0
 		var steps := int(90.0 / delta)
 		for step in steps:
@@ -42,11 +55,6 @@ func _run() -> void:
 				game._select_upgrade(choices[step % choices.size()]["id"])
 			game.player_pos += Vector2.from_angle(float(step) * 0.017 + character_index) * 1.6
 			game.camera.position = game.player_pos
-			game.skill_cooldown_remaining = maxf(0.0, game.skill_cooldown_remaining - delta)
-			if step % 210 == 0:
-				game.skill_cooldown_remaining = 0.0
-				if game._use_character_skill():
-					skill_uses += 1
 			game._update_spawning(delta)
 			game._update_weapons(delta)
 			game._update_projectiles(delta)
@@ -64,10 +72,7 @@ func _run() -> void:
 		if float(game.damage_by_source["starter"]) <= 0.0:
 			_fail("%s 的專屬起始武器沒有累積傷害" % character_id)
 			return
-		if skill_uses < 5:
-			_fail("%s 的主動戰技無法持續施放" % character_id)
-			return
-		summaries.append("%s=%d kills/%d damage/%d skills" % [character_id, game.kills, int(game.total_damage_dealt), skill_uses])
+		summaries.append("%s=%d kills/%d damage/%s" % [character_id, game.kills, int(game.total_damage_dealt), expected_effects[character_id]])
 		get_tree().paused = false
 		game.queue_free()
 
