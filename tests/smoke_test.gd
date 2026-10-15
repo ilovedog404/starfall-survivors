@@ -141,6 +141,22 @@ func _run() -> void:
 	if game.needle_level < 1:
 		_fail("星針升級沒有套用")
 		return
+	game.scythe_level = 5
+	game.meta_levels["armor"] = 3
+	var evolution_found := false
+	for option in game._available_upgrades():
+		if option["id"] == "scythe_evolution":
+			evolution_found = true
+			break
+	if not evolution_found:
+		_fail("星源鐮環達成條件後沒有出現進化")
+		return
+	var old_radius: float = game.scythe_radius
+	game.pending_levels = 1
+	game._select_upgrade("scythe_evolution")
+	if not game.scythe_evolved or game.scythe_radius <= old_radius:
+		_fail("崩星護界進化沒有正確套用")
+		return
 	game.storm_level = 1
 	game._spawn_mutant("chaser")
 	game.enemies[-1]["pos"] = game.player_pos + Vector2(80.0, 0.0)
@@ -165,7 +181,7 @@ func _run() -> void:
 		_fail("使徒討伐結算沒有觸發")
 		return
 
-	print("SMOKE_TEST_PASS: character-select/pause-menu/build/enemy-types/waves/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: character-select/pause-menu/build/evolution/enemy-types/waves/skills/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

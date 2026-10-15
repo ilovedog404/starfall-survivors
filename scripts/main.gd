@@ -8,7 +8,7 @@ const APOSTLE_TIME := 240.0
 const VIEW_SIZE := Vector2(1280.0, 720.0)
 const MAX_ENEMIES := 650
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.3.2"
+const VERSION := "Beta0.4.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -97,6 +97,7 @@ var scythe_damage := 24.0
 var scythe_radius := 132.0
 var scythe_interval := 1.55
 var scythe_timer := 0.25
+var scythe_evolved := false
 
 var needle_level := 0
 var needle_damage := 17.0
@@ -699,6 +700,7 @@ func _start_game() -> void:
 	scythe_radius = 132.0
 	scythe_interval = 1.55
 	scythe_timer = 0.25
+	scythe_evolved = false
 	needle_level = 0
 	needle_damage = 17.0
 	needle_interval = 0.72
@@ -774,11 +776,11 @@ func _toggle_build_overlay() -> void:
 
 func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
-	build_text.text = "%s｜%s\n%s\n\n武器\n• 星源鐮環　Lv.%d / 5\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5\n\n重抽剩餘　%d" % [
+	build_text.text = "%s｜%s\n%s\n\n武器\n• %s\n• 星針　　　%s\n• 脈衝雷暴　%s\n\n能力\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5\n\n進化條件：星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
 		character_data["passive"],
-		scythe_level,
+		("崩星護界　已進化" if scythe_evolved else "星源鐮環　Lv.%d / 5" % scythe_level),
 		("未取得" if needle_level == 0 else "Lv.%d / 5" % needle_level),
 		("未取得" if storm_level == 0 else "Lv.%d / 5" % storm_level),
 		int(meta_levels["health"]),
@@ -1026,11 +1028,14 @@ func _fire_scythe_ring() -> void:
 	var dealt_damage := scythe_damage * damage_multiplier * close_damage_multiplier
 	if scythe_level >= 5:
 		dealt_damage *= 1.35
+	if scythe_evolved:
+		dealt_damage *= 1.5
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
 		if player_pos.distance_to(enemy["pos"]) <= scythe_radius + float(enemy["radius"]):
 			_damage_enemy(index, dealt_damage)
-	player_shield = minf(player_max_shield, player_shield + 1.2 + scythe_level * 0.35)
+	var shield_restore := 1.2 + scythe_level * 0.35 + (3.0 if scythe_evolved else 0.0)
+	player_shield = minf(player_max_shield, player_shield + shield_restore)
 	effects.append({
 		"kind": "ring",
 		"pos": player_pos,
@@ -1342,6 +1347,12 @@ func _available_upgrades() -> Array:
 			"name": "星源鐮環 Lv.%d" % (scythe_level + 1),
 			"description": _scythe_upgrade_description(scythe_level + 1),
 		})
+	elif int(meta_levels["armor"]) >= 3 and not scythe_evolved:
+		result.append({
+			"id": "scythe_evolution",
+			"name": "進化：崩星護界",
+			"description": "星源鐮環 Lv.5 ＋ 強化裝甲 Lv.3\n大幅提高傷害、範圍、攻速與護盾回復",
+		})
 	if needle_level < 5:
 		result.append({
 			"id": "needle",
@@ -1407,6 +1418,13 @@ func _select_upgrade(upgrade_id: String) -> void:
 				5:
 					scythe_damage += 14.0
 					player_max_shield += 8.0
+		"scythe_evolution":
+			if scythe_level >= 5 and int(meta_levels["armor"]) >= 3 and not scythe_evolved:
+				scythe_evolved = true
+				scythe_radius += 36.0
+				scythe_interval *= 0.82
+				player_max_shield += 12.0
+				player_shield = player_max_shield
 		"needle":
 			needle_level += 1
 			match needle_level:
@@ -1472,9 +1490,8 @@ func _update_interface(delta: float) -> void:
 		WAVE_TIMES.size(),
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
-	weapon_label.text = "星源鐮環 Lv.%d%s\n星針 %s｜脈衝雷暴 %s" % [
-		scythe_level,
-		("｜超載" if scythe_level >= 5 else ""),
+	weapon_label.text = "%s\n星針 %s｜脈衝雷暴 %s" % [
+		("崩星護界｜進化" if scythe_evolved else "星源鐮環 Lv.%d%s" % [scythe_level, ("｜超載" if scythe_level >= 5 else "")]),
 		("未取得" if needle_level == 0 else "Lv.%d" % needle_level),
 		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
 	]
@@ -1652,6 +1669,8 @@ func _draw_effect(effect: Dictionary) -> void:
 			var radius := lerpf(32.0, float(effect["radius"]), progress)
 			draw_arc(effect["pos"], radius, 0.0, TAU, 64, Color(0.25, 0.9, 1.0, alpha), 8.0, true)
 			draw_arc(effect["pos"], radius * 0.82, -0.4, 3.8, 48, Color(0.78, 0.96, 1.0, alpha * 0.85), 4.0, true)
+			if scythe_evolved:
+				draw_arc(effect["pos"], radius * 0.66, 0.8, 5.7, 52, Color(0.95, 0.78, 1.0, alpha), 6.0, true)
 		"burst":
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(1.0, 0.32, 0.48, alpha * 0.6))
 		"hurt":
