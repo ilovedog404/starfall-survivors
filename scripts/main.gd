@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.7.3"
+const VERSION := "Beta0.8.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -945,17 +945,17 @@ func _trigger_wave(index: int) -> void:
 		0: composition = ["dasher", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher"]
 		1: composition = ["shooter", "shooter", "shooter", "shooter", "shooter", "shooter", "chaser", "chaser", "chaser", "chaser"]
 		_: composition = ["tank", "tank", "tank", "tank", "tank", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher"]
-	for kind in composition:
+	for spawn_index in composition.size():
 		if enemies.size() >= MAX_ENEMIES:
 			break
-		_spawn_mutant(kind)
-	instruction_label.text = "異變體波次 %d／%d 接近" % [index + 1, WAVE_TIMES.size()]
+		_spawn_mutant(composition[spawn_index], spawn_index == 0)
+	instruction_label.text = "異變體波次 %d／%d 接近｜偵測到精英" % [index + 1, WAVE_TIMES.size()]
 	instruction_label.visible = true
 	instruction_time = 4.0
 	effects.append({"kind": "warning", "pos": player_pos, "life": 1.1, "total": 1.1, "radius": 300.0})
 
 
-func _spawn_mutant(force_kind: String = "") -> void:
+func _spawn_mutant(force_kind: String = "", force_elite: bool = false) -> void:
 	var angle := rng.randf_range(0.0, TAU)
 	var distance := rng.randf_range(650.0, 830.0)
 	var kind := force_kind
@@ -970,7 +970,7 @@ func _spawn_mutant(force_kind: String = "") -> void:
 		else:
 			kind = "chaser"
 	var difficulty := 1.0 + game_time / 360.0
-	var elite := game_time > 50.0 and rng.randf() < 0.025
+	var elite := force_elite or (game_time > 50.0 and rng.randf() < 0.025)
 	var base_hp := 31.0
 	var base_speed := 76.0
 	var radius := 15.0

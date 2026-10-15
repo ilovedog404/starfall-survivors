@@ -138,6 +138,13 @@ func _run() -> void:
 	if game.wave_index != 1 or game.enemies.size() < 8:
 		_fail("第一波異變體沒有正確生成")
 		return
+	var wave_elites := 0
+	for enemy in game.enemies:
+		if enemy["elite"]:
+			wave_elites += 1
+	if wave_elites < 1:
+		_fail("定時波次沒有生成保證精英")
+		return
 	game._start_game()
 	game._spawn_mutant("chaser")
 	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
@@ -256,7 +263,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
