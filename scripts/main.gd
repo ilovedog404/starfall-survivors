@@ -18,7 +18,7 @@ const MAX_HOSTILE_PROJECTILES := 180
 const LOW_DETAIL_ENEMY_COUNT := 220
 const DRAW_MARGIN := 180.0
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.12.1"
+const VERSION := "Beta0.13.1"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -177,6 +177,7 @@ var apostle_spawned := false
 var apostle_present := false
 var apostle_hp := 0.0
 var apostle_max_hp := 0.0
+var apostle_phase := 1
 
 var canvas_layer: CanvasLayer
 var ui_theme: Theme
@@ -859,6 +860,7 @@ func _start_game() -> void:
 	apostle_present = false
 	apostle_hp = 0.0
 	apostle_max_hp = 0.0
+	apostle_phase = 1
 
 	camera.position = player_pos
 	character_overlay.visible = false
@@ -1370,6 +1372,7 @@ func _spawn_apostle() -> void:
 	apostle_present = true
 	apostle_max_hp = 4800.0
 	apostle_hp = apostle_max_hp
+	apostle_phase = 1
 	enemies.append({
 		"pos": player_pos + Vector2(0.0, -650.0),
 		"hp": apostle_max_hp,
@@ -1388,8 +1391,18 @@ func _spawn_apostle() -> void:
 		"dash_dir": Vector2.ZERO,
 		"contact_cooldown": 0.0,
 		"attack_cooldown": 1.8,
+		"phase": 1,
+		"phase_transition": 0.0,
+		"attack_cycle": 0,
 		"burst_charge": 0.0,
 		"burst_angle": 0.0,
+		"fan_charge": 0.0,
+		"fan_dir": Vector2.ZERO,
+		"boss_dash_charge": 0.0,
+		"boss_dash_time": 0.0,
+		"boss_dash_dir": Vector2.ZERO,
+		"hazard_charge": 0.0,
+		"hazard_target": Vector2.ZERO,
 		"shot_charge": 0.0,
 		"shot_dir": Vector2.ZERO,
 		"summon_cooldown": 6.0,
@@ -1667,25 +1680,7 @@ func _update_enemies(delta: float) -> void:
 		var status_speed := float(enemy.get("slow_factor", 1.0)) if float(enemy.get("slow_time", 0.0)) > 0.0 else 1.0
 
 		if enemy["boss"]:
-			var burst_charge: float = float(enemy.get("burst_charge", 0.0))
-			var boss_move_factor := 0.28 if burst_charge > 0.0 else 1.0
-			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * boss_move_factor * delta
-			enemy["summon_cooldown"] = float(enemy["summon_cooldown"]) - delta
-			if burst_charge > 0.0:
-				enemy["burst_charge"] = burst_charge - delta
-				if float(enemy["burst_charge"]) <= 0.0:
-					enemy["burst_charge"] = 0.0
-					_fire_apostle_burst(enemy["pos"], float(enemy.get("burst_angle", 0.0)))
-					enemy["attack_cooldown"] = 2.35
-			else:
-				enemy["attack_cooldown"] = float(enemy["attack_cooldown"]) - delta
-				if float(enemy["attack_cooldown"]) <= 0.0:
-					enemy["burst_angle"] = game_time * 0.22
-					enemy["burst_charge"] = 0.85
-			if float(enemy["summon_cooldown"]) <= 0.0:
-				for summon_index in 5:
-					_spawn_mutant("chaser" if summon_index % 2 == 0 else "dasher")
-				enemy["summon_cooldown"] = 7.0
+			enemy = _update_apostle(enemy, delta, status_speed)
 		elif enemy["kind"] == "guardian":
 			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 			enemy["support_cooldown"] = float(enemy.get("support_cooldown", 0.0)) - delta
@@ -1754,6 +1749,82 @@ func _update_enemies(delta: float) -> void:
 		enemies[index] = enemy
 
 
+func _update_apostle(enemy: Dictionary, delta: float, status_speed: float) -> Dictionary:
+	var hp_ratio: float = float(enemy["hp"]) / maxf(1.0, float(enemy["max_hp"]))
+	if int(enemy.get("phase", 1)) == 1 and hp_ratio <= 0.5:
+		enemy["phase"] = 2
+		enemy["phase_transition"] = 1.15
+		enemy["attack_cooldown"] = 0.75
+		enemy["speed"] = float(enemy["speed"]) * 1.16
+		enemy["summon_cooldown"] = 3.0
+		apostle_phase = 2
+		hostile_projectiles.clear()
+		effects.append({"kind": "apostle_phase", "pos": enemy["pos"], "life": 1.15, "total": 1.15, "radius": 230.0})
+		_show_game_notice("使徒進入第二階段：攻擊模式改變")
+
+	if float(enemy.get("phase_transition", 0.0)) > 0.0:
+		enemy["phase_transition"] = maxf(0.0, float(enemy["phase_transition"]) - delta)
+		return enemy
+
+	var direction: Vector2 = enemy["pos"].direction_to(player_pos)
+	if float(enemy.get("boss_dash_time", 0.0)) > 0.0:
+		enemy["boss_dash_time"] = maxf(0.0, float(enemy["boss_dash_time"]) - delta)
+		enemy["pos"] += Vector2(enemy["boss_dash_dir"]) * float(enemy["speed"]) * 7.2 * status_speed * delta
+		if float(enemy["boss_dash_time"]) <= 0.0:
+			enemy["attack_cooldown"] = 1.35
+	elif float(enemy.get("boss_dash_charge", 0.0)) > 0.0:
+		enemy["boss_dash_charge"] = float(enemy["boss_dash_charge"]) - delta
+		if float(enemy["boss_dash_charge"]) <= 0.0:
+			enemy["boss_dash_charge"] = 0.0
+			enemy["boss_dash_time"] = 0.48
+	elif float(enemy.get("fan_charge", 0.0)) > 0.0:
+		enemy["fan_charge"] = float(enemy["fan_charge"]) - delta
+		if float(enemy["fan_charge"]) <= 0.0:
+			enemy["fan_charge"] = 0.0
+			_fire_apostle_fan(enemy["pos"], enemy["fan_dir"])
+			enemy["attack_cooldown"] = 1.45
+	elif float(enemy.get("hazard_charge", 0.0)) > 0.0:
+		enemy["hazard_charge"] = float(enemy["hazard_charge"]) - delta
+		if float(enemy["hazard_charge"]) <= 0.0:
+			enemy["hazard_charge"] = 0.0
+			_create_apostle_hazards(enemy["hazard_target"], enemy["pos"].direction_to(enemy["hazard_target"]))
+			enemy["attack_cooldown"] = 1.5
+	elif float(enemy.get("burst_charge", 0.0)) > 0.0:
+		enemy["burst_charge"] = float(enemy["burst_charge"]) - delta
+		if float(enemy["burst_charge"]) <= 0.0:
+			enemy["burst_charge"] = 0.0
+			_fire_apostle_burst(enemy["pos"], float(enemy.get("burst_angle", 0.0)))
+			enemy["attack_cooldown"] = 2.35
+	else:
+		enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
+		enemy["attack_cooldown"] = float(enemy["attack_cooldown"]) - delta
+		if float(enemy["attack_cooldown"]) <= 0.0:
+			if int(enemy.get("phase", 1)) == 1:
+				enemy["burst_angle"] = game_time * 0.22
+				enemy["burst_charge"] = 0.85
+			else:
+				var attack_cycle: int = int(enemy.get("attack_cycle", 0)) % 3
+				enemy["attack_cycle"] = attack_cycle + 1
+				match attack_cycle:
+					0:
+						enemy["fan_dir"] = direction
+						enemy["fan_charge"] = 0.68
+					1:
+						enemy["boss_dash_dir"] = direction
+						enemy["boss_dash_charge"] = 0.72
+					_:
+						enemy["hazard_target"] = player_pos
+						enemy["hazard_charge"] = 0.78
+
+	enemy["summon_cooldown"] = float(enemy["summon_cooldown"]) - delta
+	if float(enemy["summon_cooldown"]) <= 0.0:
+		var summon_count := 3 if int(enemy.get("phase", 1)) >= 2 else 5
+		for summon_index in summon_count:
+			_spawn_mutant("chaser" if summon_index % 2 == 0 else "dasher")
+		enemy["summon_cooldown"] = 8.5 if int(enemy.get("phase", 1)) >= 2 else 7.0
+	return enemy
+
+
 func _fire_apostle_burst(origin: Vector2, angle_offset: float = 0.0) -> void:
 	var projectile_count := 12
 	for index in projectile_count:
@@ -1766,6 +1837,41 @@ func _fire_apostle_burst(origin: Vector2, angle_offset: float = 0.0) -> void:
 			"radius": 9.0,
 			"damage": 10.0,
 			"life": 6.0,
+		})
+
+
+func _fire_apostle_fan(origin: Vector2, locked_direction: Vector2) -> void:
+	var base_direction := locked_direction.normalized()
+	if base_direction == Vector2.ZERO:
+		base_direction = origin.direction_to(player_pos)
+	for projectile_index in 7:
+		if hostile_projectiles.size() >= MAX_HOSTILE_PROJECTILES:
+			break
+		var ratio := float(projectile_index) / 6.0
+		var shot_direction := base_direction.rotated(lerpf(-0.62, 0.62, ratio))
+		hostile_projectiles.append({
+			"kind": "fan",
+			"pos": origin,
+			"velocity": shot_direction * 275.0,
+			"radius": 10.0,
+			"damage": 12.0,
+			"life": 5.0,
+		})
+
+
+func _create_apostle_hazards(center: Vector2, cast_direction: Vector2) -> void:
+	var perpendicular := cast_direction.normalized().rotated(PI * 0.5)
+	if perpendicular == Vector2.ZERO:
+		perpendicular = Vector2.UP
+	for offset in [Vector2.ZERO, perpendicular * 112.0, perpendicular * -112.0]:
+		effects.append({
+			"kind": "apostle_hazard",
+			"pos": center + offset,
+			"life": 4.0,
+			"total": 4.0,
+			"radius": 76.0,
+			"arm_time": 0.62,
+			"damage_tick": 0.0,
 		})
 
 
@@ -2273,6 +2379,14 @@ func _update_effects(delta: float) -> void:
 			if float(effect["damage_tick"]) <= 0.0 and player_pos.distance_squared_to(effect["pos"]) <= hazard_radius * hazard_radius:
 				_take_player_damage(8.0)
 				effect["damage_tick"] = 0.7
+		elif effect.get("kind", "") == "apostle_hazard":
+			effect["arm_time"] = maxf(0.0, float(effect.get("arm_time", 0.0)) - delta)
+			if float(effect["arm_time"]) <= 0.0:
+				effect["damage_tick"] = float(effect.get("damage_tick", 0.0)) - delta
+				var apostle_hazard_radius: float = float(effect["radius"]) + 16.0
+				if float(effect["damage_tick"]) <= 0.0 and player_pos.distance_squared_to(effect["pos"]) <= apostle_hazard_radius * apostle_hazard_radius:
+					_take_player_damage(11.0)
+					effect["damage_tick"] = 0.65
 		elif effect.get("kind", "") == "elite_explosion" and float(effect["life"]) <= 0.0:
 			var blast_radius: float = float(effect["radius"]) + 16.0
 			if player_pos.distance_squared_to(effect["pos"]) <= blast_radius * blast_radius:
@@ -2354,6 +2468,7 @@ func _update_interface(delta: float) -> void:
 	if apostle_present:
 		boss_bar.max_value = apostle_max_hp
 		boss_bar.value = apostle_hp
+		boss_label.text = "使徒｜第 %d 階段" % apostle_phase
 		boss_bar.visible = true
 		boss_label.visible = true
 	else:
@@ -2449,9 +2564,10 @@ func _draw() -> void:
 	for projectile in hostile_projectiles:
 		if not _is_world_visible(projectile["pos"], 48.0):
 			continue
-		draw_circle(projectile["pos"], float(projectile["radius"]), Color(1.0, 0.2, 0.48))
+		var hostile_color := Color(1.0, 0.48, 0.12) if projectile.get("kind", "") == "fan" else Color(1.0, 0.2, 0.48)
+		draw_circle(projectile["pos"], float(projectile["radius"]), hostile_color)
 		if enemies.size() < LOW_DETAIL_ENEMY_COUNT:
-			draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, 0.0, TAU, 18, Color(1.0, 0.65, 0.8), 2.0, true)
+			draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, 0.0, TAU, 18, hostile_color.lightened(0.42), 2.0, true)
 
 	for enemy in enemies:
 		if not _is_world_visible(enemy["pos"], DRAW_MARGIN + float(enemy["radius"])):
@@ -2504,7 +2620,7 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	var flash: bool = float(enemy["flash"]) > 0.0
 	var low_detail := enemies.size() >= LOW_DETAIL_ENEMY_COUNT
 	if enemy["boss"]:
-		var boss_color := Color(1.0, 0.24, 0.52) if not flash else Color.WHITE
+		var boss_color := (Color(1.0, 0.16, 0.22) if int(enemy.get("phase", 1)) >= 2 else Color(1.0, 0.24, 0.52)) if not flash else Color.WHITE
 		draw_circle(position, radius, Color(boss_color, 0.28))
 		draw_arc(position, radius, 0.0, TAU, 48, boss_color, 7.0, true)
 		draw_arc(position, radius * 0.64, game_time, game_time + TAU * 0.74, 38, Color(0.9, 0.55, 1.0), 5.0, true)
@@ -2528,6 +2644,33 @@ func _draw_enemy(enemy: Dictionary) -> void:
 					3.0,
 					true
 				)
+		var phase_transition: float = float(enemy.get("phase_transition", 0.0))
+		if phase_transition > 0.0:
+			var phase_progress := 1.0 - phase_transition / 1.15
+			draw_circle(position, radius + 110.0 * phase_progress, Color(1.0, 0.08, 0.16, 0.12))
+			draw_arc(position, radius + 110.0 * phase_progress, 0.0, TAU, 64, Color(1.0, 0.18, 0.12, 0.95 - phase_progress * 0.4), 10.0, true)
+		var fan_charge: float = float(enemy.get("fan_charge", 0.0))
+		if fan_charge > 0.0:
+			var fan_direction: Vector2 = enemy.get("fan_dir", Vector2.RIGHT)
+			var fan_alpha := 0.5 + 0.38 * sin(fan_charge * 30.0)
+			for edge_angle in [-0.62, 0.62]:
+				draw_line(position, position + fan_direction.rotated(edge_angle) * 330.0, Color(1.0, 0.48, 0.12, fan_alpha), 5.0, true)
+			draw_arc(position, 180.0, fan_direction.angle() - 0.62, fan_direction.angle() + 0.62, 30, Color(1.0, 0.48, 0.12, fan_alpha), 4.0, true)
+		var boss_dash_charge: float = float(enemy.get("boss_dash_charge", 0.0))
+		if boss_dash_charge > 0.0:
+			var boss_dash_direction: Vector2 = enemy.get("boss_dash_dir", Vector2.RIGHT)
+			var dash_alpha := 0.5 + 0.38 * sin(boss_dash_charge * 34.0)
+			draw_line(position, position + boss_dash_direction * 470.0, Color(1.0, 0.18, 0.12, dash_alpha), 13.0, true)
+			draw_line(position, position + boss_dash_direction * 470.0, Color(1.0, 0.72, 0.22, dash_alpha), 4.0, true)
+		var hazard_charge: float = float(enemy.get("hazard_charge", 0.0))
+		if hazard_charge > 0.0:
+			var hazard_target: Vector2 = enemy.get("hazard_target", player_pos)
+			var hazard_direction: Vector2 = position.direction_to(hazard_target)
+			var hazard_perpendicular := hazard_direction.rotated(PI * 0.5)
+			var hazard_alpha := 0.5 + 0.38 * sin(hazard_charge * 30.0)
+			for hazard_offset in [Vector2.ZERO, hazard_perpendicular * 112.0, hazard_perpendicular * -112.0]:
+				draw_circle(hazard_target + hazard_offset, 76.0, Color(1.0, 0.12, 0.36, hazard_alpha * 0.12))
+				draw_arc(hazard_target + hazard_offset, 76.0, 0.0, TAU, 42, Color(1.0, 0.3, 0.48, hazard_alpha), 5.0, true)
 		if float(enemy.get("burn_time", 0.0)) > 0.0:
 			draw_arc(position, radius + 12.0, -1.2, 2.2, 24, Color(1.0, 0.38, 0.08, 0.9), 5.0, true)
 		if float(enemy.get("slow_time", 0.0)) > 0.0:
@@ -2694,6 +2837,16 @@ func _draw_effect(effect: Dictionary) -> void:
 			var explosion_radius := float(effect["radius"]) * (0.35 + progress * 0.65)
 			draw_circle(effect["pos"], explosion_radius, Color(1.0, 0.12, 0.2, 0.08 + progress * 0.18))
 			draw_arc(effect["pos"], explosion_radius, 0.0, TAU, 48, Color(1.0, 0.28, 0.18, 0.9), 7.0, true)
+		"apostle_phase":
+			var phase_radius := float(effect["radius"]) * (0.25 + progress * 0.75)
+			draw_circle(effect["pos"], phase_radius, Color(1.0, 0.06, 0.14, alpha * 0.13))
+			draw_arc(effect["pos"], phase_radius, -progress * TAU, (1.0 - progress) * TAU, 72, Color(1.0, 0.22, 0.16, alpha), 12.0, true)
+		"apostle_hazard":
+			var armed := float(effect.get("arm_time", 0.0)) <= 0.0
+			var hazard_color := Color(1.0, 0.08, 0.22) if armed else Color(1.0, 0.72, 0.18)
+			var apostle_hazard_alpha := 0.2 + 0.12 * sin(game_time * (9.0 if armed else 5.0))
+			draw_circle(effect["pos"], float(effect["radius"]), Color(hazard_color, apostle_hazard_alpha))
+			draw_arc(effect["pos"], float(effect["radius"]), game_time * 0.8, game_time * 0.8 + TAU, 48, Color(hazard_color, 0.92), 6.0, true)
 
 
 func _draw_player() -> void:
