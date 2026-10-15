@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.10.1"
+const VERSION := "Beta0.10.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",

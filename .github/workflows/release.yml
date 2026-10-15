@@ -47,6 +47,8 @@ jobs:
           grep -q "SMOKE_TEST_PASS" /tmp/smoke.log
           "$GODOT" --headless --path . --scene res://tests/simulation_test.tscn --quit-after 240 2>&1 | tee /tmp/simulation.log
           grep -q "SIMULATION_TEST_PASS" /tmp/simulation.log
+          "$GODOT" --headless --path . --scene res://tests/roster_test.tscn --quit-after 360 2>&1 | tee /tmp/roster.log
+          grep -q "ROSTER_TEST_PASS" /tmp/roster.log
           "$GODOT" --headless --path . --scene res://tests/performance_test.tscn --quit-after 240 2>&1 | tee /tmp/performance.log
           grep -q "PERFORMANCE_TEST_PASS" /tmp/performance.log
           "$GODOT" --headless --path . --export-release Web "$PWD/public/index.html"
