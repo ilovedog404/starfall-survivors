@@ -332,7 +332,7 @@ func _run() -> void:
 	game._show_character_select()
 	game._choose_character("claire")
 	game._start_game()
-	game._spawn_mutant("chaser", true)
+	game._spawn_mutant("chaser", true, "swift")
 	game.enemies[0]["hp"] = 1.0
 	game._damage_enemy(0, 10.0, "starter")
 	if game.evolution_cores.size() != 1:

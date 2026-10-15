@@ -1259,8 +1259,8 @@ func _trigger_wave(index: int) -> void:
 	var composition: Array
 	match index:
 		0: composition = ["dasher", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher"]
-		1: composition = ["shooter", "shooter", "shooter", "shooter", "shooter", "shooter", "chaser", "chaser", "chaser", "chaser"]
-		_: composition = ["tank", "tank", "tank", "tank", "tank", "dasher", "dasher", "dasher", "dasher", "dasher", "dasher"]
+		1: composition = ["shooter", "shooter", "shooter", "contaminant", "contaminant", "splitter", "chaser", "chaser", "chaser", "chaser"]
+		_: composition = ["tank", "tank", "guardian", "guardian", "splitter", "splitter", "contaminant", "dasher", "dasher", "dasher", "dasher"]
 	for spawn_index in composition.size():
 		if enemies.size() >= MAX_ENEMIES:
 			break
@@ -1271,22 +1271,31 @@ func _trigger_wave(index: int) -> void:
 	effects.append({"kind": "warning", "pos": player_pos, "life": 1.1, "total": 1.1, "radius": 300.0})
 
 
-func _spawn_mutant(force_kind: String = "", force_elite: bool = false) -> void:
+func _spawn_mutant(force_kind: String = "", force_elite: bool = false, force_affix: String = "") -> void:
 	var angle := rng.randf_range(0.0, TAU)
 	var distance := rng.randf_range(650.0, 830.0)
 	var kind := force_kind
 	if kind.is_empty():
 		var roll := rng.randf()
-		if game_time > 150.0 and roll < 0.1:
+		if game_time > 165.0 and roll < 0.08:
+			kind = "guardian"
+		elif game_time > 135.0 and roll < 0.16:
+			kind = "splitter"
+		elif game_time > 105.0 and roll < 0.24:
+			kind = "contaminant"
+		elif game_time > 150.0 and roll < 0.34:
 			kind = "tank"
-		elif game_time > 90.0 and roll < 0.28:
+		elif game_time > 90.0 and roll < 0.48:
 			kind = "shooter"
-		elif game_time > 35.0 and roll < 0.52:
+		elif game_time > 35.0 and roll < 0.66:
 			kind = "dasher"
 		else:
 			kind = "chaser"
 	var difficulty := 1.0 + game_time / 360.0
 	var elite := force_elite or (game_time > 50.0 and rng.randf() < 0.025)
+	var elite_affix := ""
+	if elite:
+		elite_affix = force_affix if force_affix in ["swift", "shielded", "explosive"] else ["swift", "shielded", "explosive"][rng.randi_range(0, 2)]
 	var base_hp := 31.0
 	var base_speed := 76.0
 	var radius := 15.0
@@ -1303,12 +1312,27 @@ func _spawn_mutant(force_kind: String = "", force_elite: bool = false) -> void:
 			base_hp = 98.0
 			base_speed = 42.0
 			radius = 24.0
+		"guardian":
+			base_hp = 74.0
+			base_speed = 48.0
+			radius = 21.0
+		"splitter":
+			base_hp = 46.0
+			base_speed = 64.0
+			radius = 17.0
+		"contaminant":
+			base_hp = 40.0
+			base_speed = 54.0
+			radius = 18.0
 	var hp := base_hp * difficulty
 	var speed := base_speed * (1.0 + game_time / 900.0)
 	if elite:
 		hp *= 4.2
 		speed *= 1.12
 		radius *= 1.45
+		if elite_affix == "swift":
+			speed *= 1.35
+	var elite_shield := hp * 0.34 if elite_affix == "shielded" else 0.0
 	enemies.append({
 		"pos": player_pos + Vector2.from_angle(angle) * distance,
 		"hp": hp,
@@ -1317,6 +1341,9 @@ func _spawn_mutant(force_kind: String = "", force_elite: bool = false) -> void:
 		"radius": radius,
 		"kind": kind,
 		"elite": elite,
+		"elite_affix": elite_affix,
+		"elite_shield": elite_shield,
+		"elite_max_shield": elite_shield,
 		"boss": false,
 		"dash_cooldown": rng.randf_range(1.4, 3.2),
 		"dash_time": 0.0,
@@ -1332,6 +1359,9 @@ func _spawn_mutant(force_kind: String = "", force_elite: bool = false) -> void:
 		"burn_damage": 0.0,
 		"slow_time": 0.0,
 		"slow_factor": 1.0,
+		"guarded_time": 0.0,
+		"support_cooldown": rng.randf_range(0.2, 0.8),
+		"contamination_cooldown": rng.randf_range(0.8, 2.2),
 	})
 
 
@@ -1348,6 +1378,9 @@ func _spawn_apostle() -> void:
 		"radius": 64.0,
 		"kind": "apostle",
 		"elite": true,
+		"elite_affix": "",
+		"elite_shield": 0.0,
+		"elite_max_shield": 0.0,
 		"boss": true,
 		"dash_cooldown": 2.4,
 		"dash_time": 0.0,
@@ -1366,6 +1399,7 @@ func _spawn_apostle() -> void:
 		"burn_damage": 0.0,
 		"slow_time": 0.0,
 		"slow_factor": 1.0,
+		"guarded_time": 0.0,
 	})
 	boss_bar.visible = true
 	boss_label.visible = true
@@ -1601,6 +1635,7 @@ func _update_enemy_statuses(delta: float) -> void:
 			continue
 		var enemy = enemies[index]
 		enemy["slow_time"] = maxf(0.0, float(enemy.get("slow_time", 0.0)) - delta)
+		enemy["guarded_time"] = maxf(0.0, float(enemy.get("guarded_time", 0.0)) - delta)
 		if float(enemy.get("burn_time", 0.0)) > 0.0:
 			enemy["burn_time"] = maxf(0.0, float(enemy["burn_time"]) - delta)
 			enemy["burn_tick"] = float(enemy.get("burn_tick", 0.0)) - delta
@@ -1651,6 +1686,28 @@ func _update_enemies(delta: float) -> void:
 				for summon_index in 5:
 					_spawn_mutant("chaser" if summon_index % 2 == 0 else "dasher")
 				enemy["summon_cooldown"] = 7.0
+		elif enemy["kind"] == "guardian":
+			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
+			enemy["support_cooldown"] = float(enemy.get("support_cooldown", 0.0)) - delta
+			if float(enemy["support_cooldown"]) <= 0.0:
+				for ally_index in enemies.size():
+					if ally_index == index or bool(enemies[ally_index].get("boss", false)):
+						continue
+					if enemy["pos"].distance_squared_to(enemies[ally_index]["pos"]) <= 19600.0:
+						var ally = enemies[ally_index]
+						ally["guarded_time"] = maxf(float(ally.get("guarded_time", 0.0)), 1.1)
+						enemies[ally_index] = ally
+				enemy["support_cooldown"] = 0.75
+		elif enemy["kind"] == "contaminant":
+			var contaminant_distance: float = enemy["pos"].distance_squared_to(player_pos)
+			if contaminant_distance > 48400.0:
+				enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
+			else:
+				enemy["pos"] += direction.rotated(PI * 0.5) * float(enemy["speed"]) * 0.35 * status_speed * delta
+			enemy["contamination_cooldown"] = float(enemy.get("contamination_cooldown", 0.0)) - delta
+			if float(enemy["contamination_cooldown"]) <= 0.0:
+				effects.append({"kind": "contamination", "pos": enemy["pos"], "life": 4.2, "total": 4.2, "radius": 58.0, "damage_tick": 0.0})
+				enemy["contamination_cooldown"] = 3.4
 		elif enemy["kind"] == "shooter":
 			if float(enemy.get("shot_charge", 0.0)) > 0.0:
 				enemy["shot_charge"] = float(enemy["shot_charge"]) - delta
@@ -1745,10 +1802,25 @@ func _damage_enemy(index: int, amount: float, source: String = "other") -> void:
 	if index < 0 or index >= enemies.size():
 		return
 	var enemy = enemies[index]
-	var actual_damage := minf(amount, float(enemy["hp"]))
-	total_damage_dealt += actual_damage
+	if float(enemy.get("guarded_time", 0.0)) > 0.0 and enemy.get("kind", "") != "guardian" and not bool(enemy.get("boss", false)):
+		amount *= 0.65
 	if not damage_by_source.has(source):
 		source = "other"
+	var elite_shield: float = float(enemy.get("elite_shield", 0.0))
+	if elite_shield > 0.0:
+		var shield_absorbed := minf(amount, elite_shield)
+		enemy["elite_shield"] = elite_shield - shield_absorbed
+		total_damage_dealt += shield_absorbed
+		damage_by_source[source] = float(damage_by_source[source]) + shield_absorbed
+		amount -= shield_absorbed
+		enemy["flash"] = 0.08
+		if float(enemy["elite_shield"]) <= 0.0:
+			effects.append({"kind": "shield_break", "pos": enemy["pos"], "life": 0.35, "total": 0.35, "radius": float(enemy["radius"]) + 18.0})
+		if amount <= 0.0:
+			enemies[index] = enemy
+			return
+	var actual_damage := minf(amount, float(enemy["hp"]))
+	total_damage_dealt += actual_damage
 	damage_by_source[source] = float(damage_by_source[source]) + actual_damage
 	enemy["hp"] = float(enemy["hp"]) - amount
 	enemy["flash"] = 0.08
@@ -1765,6 +1837,10 @@ func _kill_enemy(index: int) -> void:
 		return
 	var enemy = enemies[index]
 	var was_boss: bool = enemy["boss"]
+	var was_splitter: bool = enemy.get("kind", "") == "splitter"
+	var was_explosive: bool = enemy.get("elite_affix", "") == "explosive"
+	var split_position: Vector2 = enemy["pos"]
+	var split_count := 3 if bool(enemy.get("elite", false)) else 2
 	var gem_value := 8.0 if enemy["elite"] else 1.0
 	if not was_boss:
 		_drop_experience_gem(enemy["pos"], gem_value)
@@ -1774,10 +1850,30 @@ func _kill_enemy(index: int) -> void:
 	kills += 1
 	effects.append({"kind": "burst", "pos": enemy["pos"], "life": 0.24, "total": 0.24, "radius": float(enemy["radius"]) * 2.2})
 	enemies.remove_at(index)
+	if was_explosive and not was_boss:
+		effects.append({"kind": "elite_explosion", "pos": split_position, "life": 0.75, "total": 0.75, "radius": 104.0, "damage": 18.0})
+	if was_splitter and not was_boss:
+		_spawn_splitlings(split_position, split_count)
 	if was_boss:
 		apostle_present = false
 		apostle_hp = 0.0
 		_finish_game(true)
+
+
+func _spawn_splitlings(position: Vector2, count: int) -> void:
+	for split_index in count:
+		if enemies.size() >= MAX_ENEMIES:
+			return
+		_spawn_mutant("chaser")
+		var child_index := enemies.size() - 1
+		var child = enemies[child_index]
+		child["pos"] = position + Vector2.from_angle(TAU * float(split_index) / maxf(1.0, float(count))) * 18.0
+		child["hp"] = minf(float(child["hp"]), 16.0)
+		child["max_hp"] = float(child["hp"])
+		child["radius"] = 10.0
+		child["speed"] = maxf(float(child["speed"]), 92.0)
+		child["elite"] = false
+		enemies[child_index] = child
 
 
 func _drop_experience_gem(position: Vector2, value: float) -> void:
@@ -2169,9 +2265,22 @@ func _select_upgrade(upgrade_id: String) -> void:
 
 func _update_effects(delta: float) -> void:
 	for index in range(effects.size() - 1, -1, -1):
-		effects[index]["life"] = float(effects[index]["life"]) - delta
-		if float(effects[index]["life"]) <= 0.0:
+		var effect = effects[index]
+		effect["life"] = float(effect["life"]) - delta
+		if effect.get("kind", "") == "contamination":
+			effect["damage_tick"] = float(effect.get("damage_tick", 0.0)) - delta
+			var hazard_radius: float = float(effect["radius"]) + 16.0
+			if float(effect["damage_tick"]) <= 0.0 and player_pos.distance_squared_to(effect["pos"]) <= hazard_radius * hazard_radius:
+				_take_player_damage(8.0)
+				effect["damage_tick"] = 0.7
+		elif effect.get("kind", "") == "elite_explosion" and float(effect["life"]) <= 0.0:
+			var blast_radius: float = float(effect["radius"]) + 16.0
+			if player_pos.distance_squared_to(effect["pos"]) <= blast_radius * blast_radius:
+				_take_player_damage(float(effect.get("damage", 18.0)))
+		if float(effect["life"]) <= 0.0:
 			effects.remove_at(index)
+		else:
+			effects[index] = effect
 
 
 func _enforce_runtime_limits() -> void:
@@ -2430,6 +2539,9 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		"dasher": base_color = Color(1.0, 0.52, 0.2)
 		"shooter": base_color = Color(0.72, 0.34, 1.0)
 		"tank": base_color = Color(0.9, 0.26, 0.22)
+		"guardian": base_color = Color(0.22, 0.72, 1.0)
+		"splitter": base_color = Color(1.0, 0.32, 0.68)
+		"contaminant": base_color = Color(0.35, 0.9, 0.38)
 	if low_detail and float(enemy.get("burn_time", 0.0)) > 0.0:
 		base_color = base_color.lerp(Color(1.0, 0.48, 0.08), 0.48)
 	elif low_detail and float(enemy.get("slow_time", 0.0)) > 0.0:
@@ -2470,16 +2582,44 @@ func _draw_enemy(enemy: Dictionary) -> void:
 			draw_rect(Rect2(position - Vector2(radius * 0.82, radius * 0.72), Vector2(radius * 1.64, radius * 1.44)), base_color)
 			if not low_detail:
 				draw_arc(position, radius, 0.0, TAU, 24, Color(1.0, 0.58, 0.4), 4.0, true)
+		"guardian":
+			draw_circle(position, radius, Color(base_color, 0.34))
+			draw_arc(position, radius, 0.0, TAU, 28, base_color, 6.0, true)
+			draw_arc(position, radius * 0.62, -0.8, 3.9, 22, Color(0.75, 0.95, 1.0), 4.0, true)
+		"splitter":
+			draw_circle(position + Vector2(-radius * 0.34, 0.0), radius * 0.72, base_color)
+			draw_circle(position + Vector2(radius * 0.34, 0.0), radius * 0.72, base_color.darkened(0.18))
+			if not low_detail:
+				draw_line(position + Vector2(0.0, -radius), position + Vector2(0.0, radius), Color(1.0, 0.72, 0.9), 3.0, true)
+		"contaminant":
+			draw_circle(position, radius, base_color)
+			draw_arc(position, radius + 4.0, game_time * 1.4, game_time * 1.4 + 4.8, 24, Color(0.72, 1.0, 0.35), 4.0, true)
+			if not low_detail:
+				draw_circle(position, radius * 0.35, Color(0.04, 0.18, 0.06))
 		_:
 			draw_circle(position, radius, base_color)
 			if not low_detail:
 				draw_circle(position + Vector2(-5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
 				draw_circle(position + Vector2(5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
 	if enemy["elite"]:
-		draw_arc(position, radius + 5.0, 0.0, TAU, 24, Color(1.0, 0.86, 0.22), 3.0)
+		var affix_color := Color(1.0, 0.86, 0.22)
+		match enemy.get("elite_affix", ""):
+			"swift": affix_color = Color(1.0, 0.52, 0.12)
+			"shielded": affix_color = Color(0.28, 0.82, 1.0)
+			"explosive": affix_color = Color(1.0, 0.18, 0.28)
+		draw_arc(position, radius + 5.0, 0.0, TAU, 24, affix_color, 3.0)
+		if enemy.get("elite_affix", "") == "swift" and not low_detail:
+			var trail_direction: Vector2 = position.direction_to(player_pos)
+			draw_line(position - trail_direction * (radius + 8.0), position - trail_direction * (radius + 34.0), Color(affix_color, 0.7), 5.0, true)
+		elif enemy.get("elite_affix", "") == "shielded" and float(enemy.get("elite_shield", 0.0)) > 0.0:
+			draw_arc(position, radius + 10.0, -0.6, 4.6, 28, Color(affix_color, 0.88), 5.0, true)
+		elif enemy.get("elite_affix", "") == "explosive" and not low_detail:
+			draw_circle(position, 5.0 + 2.0 * sin(game_time * 9.0), affix_color)
 		var hp_ratio: float = float(enemy["hp"]) / float(enemy["max_hp"])
 		draw_rect(Rect2(position + Vector2(-radius, -radius - 11.0), Vector2(radius * 2.0, 4.0)), Color(0.18, 0.03, 0.08))
 		draw_rect(Rect2(position + Vector2(-radius, -radius - 11.0), Vector2(radius * 2.0 * hp_ratio, 4.0)), Color(1.0, 0.75, 0.22))
+	if float(enemy.get("guarded_time", 0.0)) > 0.0:
+		draw_arc(position, radius + 7.0, 0.0, TAU, 28, Color(0.3, 0.82, 1.0, 0.82), 3.0, true)
 	if float(enemy.get("burn_time", 0.0)) > 0.0 and not low_detail:
 		draw_arc(position, radius + 8.0, -1.2, 2.2, 18, Color(1.0, 0.38, 0.08, 0.9), 4.0, true)
 	if float(enemy.get("slow_time", 0.0)) > 0.0 and not low_detail:
@@ -2541,6 +2681,19 @@ func _draw_effect(effect: Dictionary) -> void:
 			draw_line(effect["pos"] + Vector2(90.0, -210.0) * (1.0 - progress), effect["pos"], Color(1.0, 0.55, 0.15, alpha), 12.0, true)
 			draw_circle(effect["pos"], meteor_radius_now, Color(1.0, 0.3, 0.08, alpha * 0.18))
 			draw_arc(effect["pos"], meteor_radius_now, 0.0, TAU, 48, Color(1.0, 0.62, 0.18, alpha), 8.0, true)
+		"contamination":
+			var hazard_alpha := minf(0.72, float(effect["life"]) * 0.28)
+			draw_circle(effect["pos"], float(effect["radius"]), Color(0.28, 0.92, 0.38, hazard_alpha * 0.16))
+			draw_arc(effect["pos"], float(effect["radius"]), game_time, game_time + TAU, 40, Color(0.4, 1.0, 0.48, hazard_alpha), 5.0, true)
+			for node_index in 5:
+				var node_angle := TAU * float(node_index) / 5.0 + game_time * 0.35
+				draw_circle(effect["pos"] + Vector2.from_angle(node_angle) * float(effect["radius"]) * 0.62, 5.0, Color(0.66, 1.0, 0.32, hazard_alpha))
+		"shield_break":
+			draw_arc(effect["pos"], float(effect["radius"]) * (0.75 + progress * 0.45), 0.0, TAU, 30, Color(0.35, 0.88, 1.0, alpha), 6.0, true)
+		"elite_explosion":
+			var explosion_radius := float(effect["radius"]) * (0.35 + progress * 0.65)
+			draw_circle(effect["pos"], explosion_radius, Color(1.0, 0.12, 0.2, 0.08 + progress * 0.18))
+			draw_arc(effect["pos"], explosion_radius, 0.0, TAU, 48, Color(1.0, 0.28, 0.18, 0.9), 7.0, true)
 
 
 func _draw_player() -> void:
