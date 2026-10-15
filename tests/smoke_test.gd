@@ -14,6 +14,9 @@ func _run() -> void:
 
 	var game = packed_scene.instantiate()
 	get_tree().root.add_child(game)
+	if not InputMap.action_has_event("build", _key_event(KEY_B)) or not InputMap.action_has_event("pause", _key_event(KEY_P)):
+		_fail("瀏覽器替代鍵 B／P 沒有註冊")
+		return
 	if not game.character_overlay.visible or game.run_started:
 		_fail("角色選擇畫面沒有在啟動時顯示")
 		return
@@ -253,8 +256,14 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
+
+
+func _key_event(keycode: Key) -> InputEventKey:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	return event
 
 
 func _fail(message: String) -> void:

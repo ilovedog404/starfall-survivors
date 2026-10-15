@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.7.2"
+const VERSION := "Beta0.7.3"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -214,13 +214,13 @@ func _ensure_input_map() -> void:
 		"move_right": [KEY_D, KEY_RIGHT],
 		"move_up": [KEY_W, KEY_UP],
 		"move_down": [KEY_S, KEY_DOWN],
-		"pause": [KEY_ESCAPE],
+		"pause": [KEY_ESCAPE, KEY_P],
 		"skill": [KEY_SPACE],
 		"upgrade_1": [KEY_1],
 		"upgrade_2": [KEY_2],
 		"upgrade_3": [KEY_3],
 		"reroll": [KEY_R],
-		"build": [KEY_TAB],
+		"build": [KEY_TAB, KEY_B],
 	}
 	for action_name in bindings:
 		if not InputMap.has_action(action_name):
@@ -326,7 +326,7 @@ func _build_interface() -> void:
 	instruction_label.offset_bottom = -20.0
 	instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	instruction_label.add_theme_font_size_override("font_size", 20)
-	instruction_label.text = "WASD／方向鍵移動　空白鍵戰技　Tab 建構　Esc 暫停"
+	instruction_label.text = "WASD／方向鍵移動　空白鍵戰技　B／Tab 建構　Esc／P 暫停"
 	hud.add_child(instruction_label)
 
 	boss_bar = ProgressBar.new()
@@ -413,7 +413,7 @@ func _build_pause_overlay() -> void:
 	column.add_child(select_button)
 
 	var hint := Label.new()
-	hint.text = "按 Esc 也可繼續"
+	hint.text = "按 Esc／P 也可繼續"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_size_override("font_size", 16)
 	column.add_child(hint)
@@ -565,7 +565,7 @@ func _build_loadout_overlay() -> void:
 	column.add_child(build_text)
 
 	var hint := Label.new()
-	hint.text = "按 Tab 或 Esc 返回戰鬥"
+	hint.text = "按 B／Tab 或 Esc／P 返回戰鬥"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_font_size_override("font_size", 17)
 	column.add_child(hint)
