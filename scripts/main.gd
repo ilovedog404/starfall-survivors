@@ -11,7 +11,7 @@ const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EFFECTS := 320
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.8.1"
+const VERSION := "Beta0.8.2"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -287,7 +287,7 @@ func _build_interface() -> void:
 	enemy_label.offset_left = -265.0
 	enemy_label.offset_top = 48.0
 	enemy_label.offset_right = -20.0
-	enemy_label.offset_bottom = 105.0
+	enemy_label.offset_bottom = 128.0
 	enemy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	enemy_label.add_theme_font_size_override("font_size", 18)
 	hud.add_child(enemy_label)
@@ -1628,10 +1628,14 @@ func _update_interface(delta: float) -> void:
 		int(player_armor),
 		kills,
 	]
-	enemy_label.text = "異變體 %d　波次 %d / %d\n使徒降臨 %s" % [
+	var threat_level := mini(5, 1 + int(game_time / 60.0))
+	var next_wave_text := "已完成" if wave_index >= WAVE_TIMES.size() else _format_countdown(maxf(0.0, float(WAVE_TIMES[wave_index]) - game_time))
+	enemy_label.text = "異變體 %d　威脅 Lv.%d\n波次 %d / %d　下一波 %s\n使徒降臨 %s" % [
 		enemies.size(),
+		threat_level,
 		wave_index,
 		WAVE_TIMES.size(),
+		next_wave_text,
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
 	weapon_label.text = "%s\n星針 %s｜脈衝雷暴 %s" % [

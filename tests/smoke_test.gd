@@ -158,6 +158,20 @@ func _run() -> void:
 	if game.level != 1 or game.scythe_level != 1:
 		_fail("初始角色狀態不正確")
 		return
+	game.game_time = 30.0
+	game.wave_index = 0
+	game._update_interface(0.0)
+	if not "下一波 00:30" in game.enemy_label.text or not "威脅 Lv.1" in game.enemy_label.text:
+		_fail("下一波倒數或威脅等級顯示不正確")
+		return
+	game.game_time = 181.0
+	game.wave_index = 3
+	game._update_interface(0.0)
+	if not "下一波 已完成" in game.enemy_label.text or not "威脅 Lv.4" in game.enemy_label.text:
+		_fail("波次完成或後期威脅等級顯示不正確")
+		return
+	game.game_time = 0.0
+	game.wave_index = 0
 
 	var starting_position: Vector2 = game.player_pos
 	Input.action_press("move_right")
@@ -263,7 +277,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/skills/pause-menu/build/evolution/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 
