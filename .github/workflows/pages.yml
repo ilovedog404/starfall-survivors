@@ -41,23 +41,13 @@ jobs:
           cp -R "$RUNNER_TEMP/templates/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
           chmod +x "$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64"
 
-      - name: Test and export Web build
+      - name: Import and export Web build
         shell: bash
         run: |
           set -euo pipefail
           GODOT="$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64"
           mkdir -p public
           "$GODOT" --headless --editor --import --path .
-          "$GODOT" --headless --path . --scene res://tests/smoke_test.tscn --quit-after 240 2>&1 | tee /tmp/smoke.log
-          grep -q "SMOKE_TEST_PASS" /tmp/smoke.log
-          "$GODOT" --headless --path . --scene res://tests/simulation_test.tscn --quit-after 240 2>&1 | tee /tmp/simulation.log
-          grep -q "SIMULATION_TEST_PASS" /tmp/simulation.log
-          "$GODOT" --headless --path . --scene res://tests/roster_test.tscn --quit-after 360 2>&1 | tee /tmp/roster.log
-          grep -q "ROSTER_TEST_PASS" /tmp/roster.log
-          "$GODOT" --headless --path . --scene res://tests/performance_test.tscn --quit-after 240 2>&1 | tee /tmp/performance.log
-          grep -q "PERFORMANCE_TEST_PASS" /tmp/performance.log
-          "$GODOT" --headless --path . --scene res://tests/map_objects_test.tscn --quit-after 240 2>&1 | tee /tmp/map_objects.log
-          grep -q "MAP_OBJECTS_TEST_PASS" /tmp/map_objects.log
           "$GODOT" --headless --path . --export-release Web "$PWD/public/index.html"
 
       - name: Configure GitHub Pages

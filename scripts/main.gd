@@ -5,7 +5,7 @@ extends Node2D
 
 const EPATHY_TEXTURE: Texture2D = preload("res://assets/sprites/epathy_chibi_v1.png")
 const ANUBARAK_TEXTURE: Texture2D = preload("res://assets/sprites/anubarak_chibi_v1.png")
-const BATTLE_MUSIC: AudioStream = preload("res://assets/audio/shissen_no_kairou.wav")
+const BATTLE_MUSIC: AudioStream = preload("res://assets/audio/seizon_no_kassen.wav")
 const ENEMY_TEXTURES := {
 	"chaser": preload("res://assets/sprites/wolf_mutant_chibi_v2.png"),
 	"dasher": preload("res://assets/sprites/wolf_mutant_chibi_v2.png"),
@@ -24,6 +24,7 @@ const MAX_ENEMIES := 650
 const MAX_GEMS := 480
 const MAX_REPAIR_CORES := 24
 const MAX_EVOLUTION_CORES := 1
+const MAX_ELITE_CHESTS := 8
 const MAX_WEAPON_SLOTS := 6
 const MAX_PASSIVE_SLOTS := 6
 const MAX_EFFECTS := 220
@@ -82,6 +83,18 @@ const CHARACTERS := {
 	},
 }
 
+# 參照經典生存遊戲武器行為後重新命名、重新數值化的星隕武裝。
+# 所有條目共用同一套資料驅動升級入口，後續批次只需擴充資料與攻擊型態。
+const ARSENAL_BLUEPRINTS := {
+	"rail_blade": {"name": "磁軌飛刃", "pattern": "aimed_burst", "damage": 11.0, "interval": 1.15, "radius": 6.0, "speed": 720.0, "amount": 1, "description": "朝最近異變體高速連射"},
+	"ion_axe": {"name": "離子戰斧", "pattern": "radial_heavy", "damage": 28.0, "interval": 2.4, "radius": 11.0, "speed": 360.0, "amount": 2, "description": "向周圍拋出高傷害旋轉戰斧"},
+	"return_disc": {"name": "折返星環", "pattern": "radial_fast", "damage": 21.0, "interval": 1.8, "radius": 9.0, "speed": 480.0, "amount": 2, "description": "向兩側發射可折返的星環"},
+	"orbit_blades": {"name": "軌道刃陣", "pattern": "orbit", "damage": 13.0, "interval": 0.72, "radius": 92.0, "speed": 0.0, "amount": 3, "description": "旋轉刃陣持續切割近身目標"},
+	"plasma_aura": {"name": "等離子場", "pattern": "aura", "damage": 8.0, "interval": 0.82, "radius": 108.0, "speed": 0.0, "amount": 1, "description": "週期傷害並削弱身旁異變體"},
+	"cryo_pool": {"name": "冷媒污染區", "pattern": "target_area", "damage": 19.0, "interval": 2.8, "radius": 74.0, "speed": 0.0, "amount": 1, "description": "在敵群腳下留下低溫傷害區"},
+	"ricochet_ray": {"name": "折射游標", "pattern": "radial_fast", "damage": 16.0, "interval": 1.45, "radius": 7.0, "speed": 610.0, "amount": 2, "description": "沿多方向穿梭的高能游標"},
+}
+
 var rng := RandomNumberGenerator.new()
 var camera: Camera2D
 var battle_music_player: AudioStreamPlayer
@@ -127,6 +140,7 @@ var spawn_timer := 0.0
 var kills := 0
 var game_over := false
 var choosing_upgrade := false
+var choosing_elite_reward := false
 var manual_paused := false
 var pending_levels := 0
 var instruction_time := 10.0
@@ -187,6 +201,9 @@ var meteor_radius := 70.0
 var meteor_interval := 2.75
 var meteor_timer := 1.35
 
+var arsenal_levels: Dictionary = {}
+var arsenal_timers: Dictionary = {}
+
 var enemies: Array = []
 var projectiles: Array = []
 var hostile_projectiles: Array = []
@@ -194,6 +211,9 @@ var gems: Array = []
 var repair_cores: Array = []
 var evolution_cores: Array = []
 var evolution_cores_owned := 0
+var elite_chests: Array = []
+var pending_elite_rewards := 0
+var elite_rewards_claimed := 0
 var effects: Array = []
 var apostle_spawned := false
 var apostle_present := false
@@ -302,6 +322,7 @@ func _process(delta: float) -> void:
 	_update_gems(delta)
 	_update_repair_cores(delta)
 	_update_evolution_cores(delta)
+	_update_elite_chests(delta)
 	_update_effects(delta)
 	_enforce_runtime_limits()
 	_update_interface(delta)
@@ -853,6 +874,7 @@ func _show_character_select() -> void:
 	run_started = false
 	game_over = false
 	choosing_upgrade = false
+	choosing_elite_reward = false
 	manual_paused = false
 	build_open = false
 	upgrade_overlay.visible = false
@@ -872,6 +894,7 @@ func _start_game() -> void:
 	run_started = true
 	game_over = false
 	choosing_upgrade = false
+	choosing_elite_reward = false
 	manual_paused = false
 	build_open = false
 	pending_levels = 0
@@ -955,6 +978,11 @@ func _start_game() -> void:
 	meteor_radius = 70.0
 	meteor_interval = 2.75
 	meteor_timer = 1.35
+	arsenal_levels.clear()
+	arsenal_timers.clear()
+	for weapon_id in ARSENAL_BLUEPRINTS:
+		arsenal_levels[weapon_id] = 0
+		arsenal_timers[weapon_id] = float(ARSENAL_BLUEPRINTS[weapon_id]["interval"]) * 0.45
 
 	enemies.clear()
 	projectiles.clear()
@@ -963,6 +991,9 @@ func _start_game() -> void:
 	repair_cores.clear()
 	evolution_cores.clear()
 	evolution_cores_owned = 0
+	elite_chests.clear()
+	pending_elite_rewards = 0
+	elite_rewards_claimed = 0
 	effects.clear()
 	apostle_spawned = false
 	apostle_present = false
@@ -1033,7 +1064,7 @@ func _handle_pause_input() -> void:
 	if build_open:
 		_toggle_build_overlay()
 		return
-	if choosing_upgrade or game_over or not run_started:
+	if choosing_upgrade or choosing_elite_reward or game_over or not run_started:
 		return
 	manual_paused = not manual_paused
 	get_tree().paused = manual_paused
@@ -1059,7 +1090,7 @@ func _toggle_build_overlay() -> void:
 		build_overlay.visible = false
 		get_tree().paused = false
 		return
-	if not run_started or choosing_upgrade or game_over or manual_paused:
+	if not run_started or choosing_upgrade or choosing_elite_reward or game_over or manual_paused:
 		return
 	build_open = true
 	_update_build_text()
@@ -1126,6 +1157,9 @@ func _weapon_slot_count() -> int:
 	var count := 1
 	for weapon_level in [needle_level, storm_level, drone_level, gravity_level, meteor_level]:
 		if weapon_level > 0:
+			count += 1
+	for weapon_id in arsenal_levels:
+		if int(arsenal_levels[weapon_id]) > 0:
 			count += 1
 	return count
 
@@ -1235,13 +1269,16 @@ func _try_consume_evolution_core() -> bool:
 
 
 func _handle_upgrade_input() -> void:
-	if not choosing_upgrade:
+	if not choosing_upgrade and not choosing_elite_reward:
 		return
 	for index in mini(3, current_upgrade_choices.size()):
 		if Input.is_action_just_pressed("upgrade_%d" % (index + 1)):
-			_select_upgrade(current_upgrade_choices[index]["id"])
+			if choosing_elite_reward:
+				_select_elite_reward(current_upgrade_choices[index]["id"])
+			else:
+				_select_upgrade(current_upgrade_choices[index]["id"])
 			return
-	if Input.is_action_just_pressed("reroll"):
+	if choosing_upgrade and Input.is_action_just_pressed("reroll"):
 		_reroll_upgrades()
 
 
@@ -1695,6 +1732,107 @@ func _update_weapons(delta: float) -> void:
 		if meteor_timer <= 0.0:
 			_fire_meteor_round()
 			meteor_timer += meteor_interval
+
+	for weapon_id in arsenal_levels:
+		var weapon_level := int(arsenal_levels[weapon_id])
+		if weapon_level <= 0:
+			continue
+		arsenal_timers[weapon_id] = float(arsenal_timers.get(weapon_id, 0.0)) - delta
+		if float(arsenal_timers[weapon_id]) <= 0.0:
+			_fire_arsenal_weapon(weapon_id, weapon_level)
+			var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
+			var cooldown_scale := pow(0.85, float(int(weapon_level >= 4) + int(weapon_level >= 7)))
+			arsenal_timers[weapon_id] = float(blueprint["interval"]) * cooldown_scale * pow(0.94, float(meta_levels["cooldown"]))
+
+
+func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
+	var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
+	var pattern: String = blueprint["pattern"]
+	var damage_scale := 1.0 + (0.25 if weapon_level >= 2 else 0.0) + (0.3 if weapon_level >= 5 else 0.0) + (0.35 if weapon_level >= 8 else 0.0)
+	var damage := float(blueprint["damage"]) * damage_scale * damage_multiplier
+	var area_scale := 1.0 + (0.22 if weapon_level >= 3 else 0.0) + (0.25 if weapon_level >= 6 else 0.0)
+	var radius := float(blueprint["radius"]) * area_scale
+	var amount := int(blueprint["amount"]) + int(weapon_level >= 3) + int(weapon_level >= 6)
+	match pattern:
+		"aimed_burst":
+			var aim := _nearest_enemy_direction()
+			for shot_index in amount:
+				var spread := (float(shot_index) - float(amount - 1) * 0.5) * 0.09
+				_spawn_arsenal_projectile(player_pos, aim.rotated(spread), float(blueprint["speed"]), damage, radius, 1.25, weapon_id)
+		"radial_heavy", "radial_fast":
+			var phase := game_time * (0.7 if pattern == "radial_heavy" else 1.2)
+			for shot_index in amount:
+				var direction := Vector2.from_angle(phase + TAU * float(shot_index) / float(amount))
+				_spawn_arsenal_projectile(player_pos, direction, float(blueprint["speed"]), damage, radius, 1.8, weapon_id)
+		"orbit":
+			for enemy_index in range(enemies.size() - 1, -1, -1):
+				var distance := player_pos.distance_to(enemies[enemy_index]["pos"])
+				if distance >= radius * 0.55 and distance <= radius + float(enemies[enemy_index]["radius"]):
+					_damage_enemy(enemy_index, damage, "other")
+			effects.append({"kind": "arsenal_orbit", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius, "amount": amount})
+		"aura":
+			for enemy_index in range(enemies.size() - 1, -1, -1):
+				var hit_radius := radius + float(enemies[enemy_index]["radius"])
+				if player_pos.distance_squared_to(enemies[enemy_index]["pos"]) <= hit_radius * hit_radius:
+					_damage_enemy(enemy_index, damage, "other")
+			effects.append({"kind": "arsenal_aura", "pos": player_pos, "life": 0.42, "total": 0.42, "radius": radius})
+		"target_area":
+			var targets := _nearest_enemy_indices(amount)
+			for target_index in targets:
+				if target_index < 0 or target_index >= enemies.size():
+					continue
+				var target_pos: Vector2 = enemies[target_index]["pos"]
+				for enemy_index in range(enemies.size() - 1, -1, -1):
+					var hit_radius := radius + float(enemies[enemy_index]["radius"])
+					if target_pos.distance_squared_to(enemies[enemy_index]["pos"]) <= hit_radius * hit_radius:
+						_damage_enemy(enemy_index, damage, "other")
+				effects.append({"kind": "arsenal_pool", "pos": target_pos, "life": 0.9, "total": 0.9, "radius": radius})
+		"screen_burst":
+			for enemy_index in range(enemies.size() - 1, -1, -1):
+				if not bool(enemies[enemy_index].get("boss", false)) or weapon_level >= 8:
+					_damage_enemy(enemy_index, damage, "other")
+			effects.append({"kind": "arsenal_screen", "pos": player_pos, "life": 0.85, "total": 0.85, "radius": radius})
+		"freeze_cone":
+			var direction := _nearest_enemy_direction()
+			for enemy_index in range(enemies.size() - 1, -1, -1):
+				var offset: Vector2 = enemies[enemy_index]["pos"] - player_pos
+				if offset.length() <= radius and absf(wrapf(offset.angle() - direction.angle(), -PI, PI)) <= 0.62:
+					var enemy = enemies[enemy_index]
+					enemy["slow_time"] = 1.2 + weapon_level * 0.16
+					enemy["slow_factor"] = 0.12 if not enemy["boss"] else 0.48
+					enemies[enemy_index] = enemy
+					_damage_enemy(enemy_index, damage, "other")
+			effects.append({"kind": "arsenal_freeze", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": radius, "angle": direction.angle()})
+		"shield":
+			var shield_gain := 5.0 + weapon_level * 1.5
+			player_max_shield = maxf(player_max_shield, 24.0 + weapon_level * 4.0)
+			player_shield = minf(player_max_shield, player_shield + shield_gain)
+			effects.append({"kind": "arsenal_shield", "pos": player_pos, "life": 0.8, "total": 0.8, "radius": radius + weapon_level * 3.0})
+
+
+func _spawn_arsenal_projectile(origin: Vector2, direction: Vector2, speed: float, damage: float, radius: float, lifetime: float, weapon_id: String) -> void:
+	if projectiles.size() >= MAX_PLAYER_PROJECTILES:
+		return
+	projectiles.append({
+		"kind": "arsenal",
+		"weapon_id": weapon_id,
+		"pos": origin,
+		"velocity": direction.normalized() * speed,
+		"damage": damage * projectile_damage_multiplier,
+		"source": "other",
+		"radius": radius * projectile_area_scale,
+		"life": lifetime,
+		"color": _arsenal_color(weapon_id),
+	})
+
+
+func _arsenal_color(weapon_id: String) -> Color:
+	match weapon_id:
+		"ion_axe": return Color(1.0, 0.45, 0.16)
+		"return_disc": return Color(1.0, 0.85, 0.24)
+		"ricochet_ray": return Color(0.42, 1.0, 0.72)
+		"twin_drones": return Color(0.92, 0.48, 1.0)
+		_: return Color(0.35, 0.82, 1.0)
 
 
 func _fire_scythe_ring() -> void:
@@ -2191,6 +2329,7 @@ func _kill_enemy(index: int) -> void:
 		if enemy["elite"]:
 			_drop_repair_core(enemy["pos"])
 			_drop_evolution_core(enemy["pos"])
+			_drop_elite_chest(enemy["pos"])
 	kills += 1
 	effects.append({"kind": "burst", "pos": enemy["pos"], "life": 0.24, "total": 0.24, "radius": float(enemy["radius"]) * 2.2})
 	enemies.remove_at(index)
@@ -2244,6 +2383,13 @@ func _drop_evolution_core(position: Vector2) -> void:
 	if evolution_cores.size() >= MAX_EVOLUTION_CORES:
 		return
 	evolution_cores.append({"pos": position + Vector2(22.0, -8.0)})
+
+
+func _drop_elite_chest(position: Vector2) -> void:
+	if elite_chests.size() >= MAX_ELITE_CHESTS:
+		pending_elite_rewards += 1
+		return
+	elite_chests.append({"pos": position + Vector2(-22.0, 8.0), "pulse": rng.randf_range(0.0, TAU)})
 
 
 func _take_player_damage(amount: float) -> void:
@@ -2321,6 +2467,24 @@ func _update_evolution_cores(delta: float) -> void:
 			evolution_cores[index] = core
 
 
+func _update_elite_chests(delta: float) -> void:
+	for index in range(elite_chests.size() - 1, -1, -1):
+		var chest = elite_chests[index]
+		chest["pulse"] = float(chest.get("pulse", 0.0)) + delta * 3.0
+		var distance_squared: float = chest["pos"].distance_squared_to(player_pos)
+		if distance_squared <= pow(pickup_radius + 40.0, 2.0):
+			var pull_speed := 180.0 + maxf(0.0, pickup_radius - sqrt(distance_squared)) * 4.0
+			chest["pos"] += chest["pos"].direction_to(player_pos) * pull_speed * delta
+		if chest["pos"].distance_squared_to(player_pos) <= 1024.0:
+			elite_chests.remove_at(index)
+			pending_elite_rewards += 1
+			effects.append({"kind": "elite_chest", "pos": player_pos, "life": 0.7, "total": 0.7, "radius": 92.0})
+			if not choosing_upgrade and not choosing_elite_reward:
+				_show_elite_reward_choices()
+		else:
+			elite_chests[index] = chest
+
+
 func _gain_experience(amount: float) -> void:
 	experience += amount
 	while experience >= experience_required:
@@ -2334,6 +2498,7 @@ func _gain_experience(amount: float) -> void:
 
 func _show_upgrade_choices() -> void:
 	choosing_upgrade = true
+	choosing_elite_reward = false
 	get_tree().paused = true
 	upgrade_overlay.visible = true
 	upgrade_title.text = "星源共鳴｜等級 %d" % level
@@ -2361,6 +2526,88 @@ func _show_upgrade_choices() -> void:
 	reroll_button.disabled = rerolls_remaining <= 0
 
 
+func _show_elite_reward_choices() -> void:
+	if pending_elite_rewards <= 0:
+		return
+	choosing_upgrade = false
+	choosing_elite_reward = true
+	get_tree().paused = true
+	upgrade_overlay.visible = true
+	upgrade_title.text = "精英戰利品｜選擇一項特殊補給"
+
+	for child in upgrade_buttons.get_children():
+		upgrade_buttons.remove_child(child)
+		child.queue_free()
+
+	var candidates := _elite_reward_candidates()
+	candidates.shuffle()
+	current_upgrade_choices.clear()
+	for index in mini(3, candidates.size()):
+		var option = candidates[index]
+		current_upgrade_choices.append(option)
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(285.0, 205.0)
+		button.text = "[%d]【戰利品】%s\n\n%s" % [index + 1, option["name"], option["description"]]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.add_theme_font_size_override("font_size", 19)
+		button.process_mode = Node.PROCESS_MODE_ALWAYS
+		button.pressed.connect(_select_elite_reward.bind(option["id"]))
+		upgrade_buttons.add_child(button)
+	reroll_button.text = "精英戰利品不可重抽"
+	reroll_button.disabled = true
+
+
+func _elite_reward_candidates() -> Array:
+	var result: Array = [
+		{"id": "weapon_tuning", "name": "主武器精煉", "description": "%s傷害 +8、作用範圍 +5%%" % _starter_weapon_name()},
+		{"id": "damage_boost", "name": "星源增幅器", "description": "本局所有傷害永久提高 10%"},
+		{"id": "overclock", "name": "戰術超頻", "description": "所有自動武器冷卻縮短 8%"},
+		{"id": "defense_cache", "name": "防衛補給", "description": "最大護盾 +12、護甲 +1，並恢復生命與護盾"},
+		{"id": "salvage", "name": "先遣搜刮權限", "description": "重骰 +2、拾取範圍 +30"},
+	]
+	if evolution_cores_owned <= 0 and (not scythe_evolved or not needle_evolved):
+		result.append({"id": "evolution_core", "name": "進化核心", "description": "取得 1 枚進化核心；達成條件時自動完成進化"})
+	return result
+
+
+func _select_elite_reward(reward_id: String) -> void:
+	match reward_id:
+		"weapon_tuning":
+			scythe_damage += 8.0
+			scythe_radius *= 1.05
+		"damage_boost":
+			damage_multiplier *= 1.1
+		"overclock":
+			scythe_interval *= 0.92
+			needle_interval *= 0.92
+			storm_interval *= 0.92
+			drone_interval *= 0.92
+			gravity_interval *= 0.92
+			meteor_interval *= 0.92
+		"defense_cache":
+			player_max_shield += 12.0
+			player_shield = player_max_shield
+			player_armor += 1.0
+			player_health = minf(player_max_health, player_health + 40.0)
+		"salvage":
+			rerolls_remaining += 2
+			pickup_radius += 30.0
+		"evolution_core":
+			evolution_cores_owned = 1
+			_try_consume_evolution_core()
+
+	elite_rewards_claimed += 1
+	pending_elite_rewards = maxi(0, pending_elite_rewards - 1)
+	if pending_elite_rewards > 0:
+		_show_elite_reward_choices()
+	elif pending_levels > 0:
+		_show_upgrade_choices()
+	else:
+		choosing_elite_reward = false
+		upgrade_overlay.visible = false
+		get_tree().paused = false
+
+
 func _pick_upgrade_choices(candidates: Array) -> Array:
 	var weapons: Array = []
 	var abilities: Array = []
@@ -2386,7 +2633,7 @@ func _pick_upgrade_choices(candidates: Array) -> Array:
 
 
 func _is_weapon_upgrade(upgrade_id: String) -> bool:
-	return upgrade_id in ["scythe", "needle", "storm", "drone", "gravity", "meteor"]
+	return upgrade_id in ["scythe", "needle", "storm", "drone", "gravity", "meteor"] or upgrade_id.begins_with("arsenal:")
 
 
 func _reroll_upgrades() -> void:
@@ -2422,6 +2669,16 @@ func _available_upgrades() -> Array:
 		result.append({"id": "gravity", "name": "重力奇點 Lv.%d" % (gravity_level + 1), "description": _gravity_upgrade_description(gravity_level + 1)})
 	if meteor_level < 5 and _can_offer_common_weapon(meteor_level):
 		result.append({"id": "meteor", "name": "隕炎彈 Lv.%d" % (meteor_level + 1), "description": _meteor_upgrade_description(meteor_level + 1)})
+	for weapon_id in ARSENAL_BLUEPRINTS:
+		var arsenal_level := int(arsenal_levels.get(weapon_id, 0))
+		if arsenal_level >= 8 or not _can_offer_common_weapon(arsenal_level):
+			continue
+		var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
+		result.append({
+			"id": "arsenal:%s" % weapon_id,
+			"name": "%s Lv.%d" % [blueprint["name"], arsenal_level + 1],
+			"description": _arsenal_upgrade_description(weapon_id, arsenal_level + 1),
+		})
 	if int(meta_levels["health"]) < 5 and _can_offer_passive("health"):
 		result.append({"id": "health", "name": "強化生命 Lv.%d" % (int(meta_levels["health"]) + 1), "description": "最大生命 +15，並回復 15 生命"})
 	if int(meta_levels["speed"]) < 5 and _can_offer_passive("speed"):
@@ -2523,7 +2780,42 @@ func _meteor_upgrade_description(next_level: int) -> String:
 	return "強化隕炎彈"
 
 
+func _arsenal_upgrade_description(weapon_id: String, next_level: int) -> String:
+	var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
+	match next_level:
+		1: return "取得武器：%s" % blueprint["description"]
+		2: return "基礎傷害提高 25%"
+		3: return "投射數量或作用範圍提高"
+		4: return "攻擊冷卻縮短 15%"
+		5: return "基礎傷害再提高 30%"
+		6: return "投射數量或作用範圍再次提高"
+		7: return "攻擊冷卻再縮短 15%"
+		8: return "完成武器極限強化"
+	return "強化%s" % blueprint["name"]
+
+
 func _select_upgrade(upgrade_id: String) -> void:
+	if upgrade_id.begins_with("arsenal:"):
+		var weapon_id := upgrade_id.trim_prefix("arsenal:")
+		arsenal_levels[weapon_id] = mini(8, int(arsenal_levels.get(weapon_id, 0)) + 1)
+		arsenal_timers[weapon_id] = 0.05
+	else:
+		_apply_standard_upgrade(upgrade_id)
+
+	_try_consume_evolution_core()
+
+	pending_levels = maxi(0, pending_levels - 1)
+	if pending_levels > 0:
+		_show_upgrade_choices()
+	elif pending_elite_rewards > 0:
+		_show_elite_reward_choices()
+	else:
+		choosing_upgrade = false
+		upgrade_overlay.visible = false
+		get_tree().paused = false
+
+
+func _apply_standard_upgrade(upgrade_id: String) -> void:
 	match upgrade_id:
 		"scythe":
 			scythe_level += 1
@@ -2612,15 +2904,6 @@ func _select_upgrade(upgrade_id: String) -> void:
 			meta_levels["precision"] = int(meta_levels["precision"]) + 1
 			projectile_damage_multiplier *= 1.12
 
-	_try_consume_evolution_core()
-
-	pending_levels = maxi(0, pending_levels - 1)
-	if pending_levels > 0:
-		_show_upgrade_choices()
-	else:
-		choosing_upgrade = false
-		upgrade_overlay.visible = false
-		get_tree().paused = false
 
 
 func _update_effects(delta: float) -> void:
@@ -2660,6 +2943,9 @@ func _enforce_runtime_limits() -> void:
 		hostile_projectiles = hostile_projectiles.slice(hostile_projectiles.size() - MAX_HOSTILE_PROJECTILES)
 	if evolution_cores.size() > MAX_EVOLUTION_CORES:
 		evolution_cores = evolution_cores.slice(evolution_cores.size() - MAX_EVOLUTION_CORES)
+	if elite_chests.size() > MAX_ELITE_CHESTS:
+		pending_elite_rewards += elite_chests.size() - MAX_ELITE_CHESTS
+		elite_chests = elite_chests.slice(elite_chests.size() - MAX_ELITE_CHESTS)
 	while gems.size() > MAX_GEMS:
 		var overflow_gem = gems.pop_back()
 		var gem_receiver = gems[gems.size() - 1]
@@ -2713,6 +2999,13 @@ func _update_interface(delta: float) -> void:
 		("未取得" if gravity_level == 0 else "Lv.%d" % gravity_level),
 		("未取得" if meteor_level == 0 else "Lv.%d" % meteor_level),
 	]
+	var active_arsenal: Array[String] = []
+	for weapon_id in arsenal_levels:
+		var arsenal_level := int(arsenal_levels[weapon_id])
+		if arsenal_level > 0:
+			active_arsenal.append("%s Lv.%d" % [ARSENAL_BLUEPRINTS[weapon_id]["name"], arsenal_level])
+	if not active_arsenal.is_empty():
+		weapon_label.text += "\n" + "｜".join(active_arsenal)
 	var skill_name: String = _starter_evolution_name() if scythe_evolved else CHARACTERS[selected_character]["skill_name"]
 	skill_label.text = "自動能力｜%s\n每 %.1f 秒發動" % [skill_name, scythe_interval]
 	skill_label.modulate = _starter_ring_color()
@@ -2801,6 +3094,17 @@ func _draw() -> void:
 		draw_arc(core_pos, 21.0 * pulse, 0.0, TAU, 28, Color(0.45, 0.95, 1.0, 0.78), 4.0, true)
 		draw_circle(core_pos, 6.0, Color(0.96, 1.0, 0.78))
 
+	for chest in elite_chests:
+		var chest_pos: Vector2 = chest["pos"]
+		if not _is_world_visible(chest_pos, 42.0):
+			continue
+		var chest_pulse := 1.0 + sin(float(chest.get("pulse", 0.0))) * 0.08
+		draw_circle(chest_pos, 25.0 * chest_pulse, Color(1.0, 0.72, 0.16, 0.15))
+		draw_rect(Rect2(chest_pos + Vector2(-17.0, -10.0) * chest_pulse, Vector2(34.0, 24.0) * chest_pulse), Color(0.18, 0.12, 0.28), true)
+		draw_rect(Rect2(chest_pos + Vector2(-17.0, -10.0) * chest_pulse, Vector2(34.0, 24.0) * chest_pulse), Color(1.0, 0.72, 0.2), false, 4.0)
+		draw_line(chest_pos + Vector2(-17.0, -2.0), chest_pos + Vector2(17.0, -2.0), Color(1.0, 0.9, 0.45), 4.0, true)
+		draw_circle(chest_pos + Vector2(0.0, 4.0), 4.0, Color(0.48, 0.95, 1.0))
+
 	for projectile in projectiles:
 		if not _is_world_visible(projectile["pos"], 48.0):
 			continue
@@ -2813,6 +3117,10 @@ func _draw() -> void:
 		elif projectile.get("kind", "") == "drone_bolt":
 			draw_line(projectile["pos"] - direction * 15.0, projectile["pos"] + direction * 5.0, Color(1.0, 0.83, 0.26), 5.0, true)
 			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.72, Color(1.0, 0.97, 0.72))
+		elif projectile.get("kind", "") == "arsenal":
+			var arsenal_color: Color = projectile.get("color", Color(0.35, 0.82, 1.0))
+			draw_line(projectile["pos"] - direction * 14.0, projectile["pos"] + direction * 7.0, Color(arsenal_color, 0.42), maxf(4.0, float(projectile["radius"]) * 0.7), true)
+			draw_circle(projectile["pos"], float(projectile["radius"]), arsenal_color)
 		else:
 			var projectile_color := Color(0.95, 0.62, 1.0) if projectile.get("evolved", false) else Color(0.5, 0.95, 1.0)
 			draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
@@ -3151,8 +3459,35 @@ func _draw_effect(effect: Dictionary) -> void:
 			for node_index in 5:
 				var node_angle := TAU * float(node_index) / 5.0 + game_time * 0.35
 				draw_circle(effect["pos"] + Vector2.from_angle(node_angle) * float(effect["radius"]) * 0.62, 5.0, Color(0.66, 1.0, 0.32, hazard_alpha))
+		"arsenal_orbit":
+			var orbit_radius := float(effect["radius"])
+			var orbit_amount := int(effect.get("amount", 3))
+			for blade_index in orbit_amount:
+				var blade_pos: Vector2 = effect["pos"] + Vector2.from_angle(game_time * 4.0 + TAU * float(blade_index) / float(orbit_amount)) * orbit_radius * 0.82
+				draw_line(blade_pos - Vector2(8.0, 0.0), blade_pos + Vector2(8.0, 0.0), Color(0.72, 0.94, 1.0, alpha), 6.0, true)
+			draw_arc(effect["pos"], orbit_radius, 0.0, TAU, 48, Color(0.32, 0.82, 1.0, alpha * 0.45), 3.0, true)
+		"arsenal_aura":
+			draw_circle(effect["pos"], float(effect["radius"]), Color(0.34, 0.88, 1.0, alpha * 0.08))
+			draw_arc(effect["pos"], float(effect["radius"]), game_time, game_time + TAU, 52, Color(0.48, 1.0, 0.86, alpha), 5.0, true)
+		"arsenal_pool":
+			draw_circle(effect["pos"], float(effect["radius"]) * (0.65 + progress * 0.35), Color(0.18, 0.62, 1.0, alpha * 0.18))
+			draw_arc(effect["pos"], float(effect["radius"]), 0.0, TAU, 44, Color(0.55, 0.88, 1.0, alpha), 5.0, true)
+		"arsenal_screen":
+			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(1.0, 0.96, 0.78, alpha * 0.22))
+			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 72, Color(1.0, 0.72, 0.22, alpha), 12.0, true)
+		"arsenal_freeze":
+			var freeze_angle := float(effect.get("angle", 0.0))
+			var freeze_radius := float(effect["radius"]) * progress
+			draw_colored_polygon(PackedVector2Array([effect["pos"], effect["pos"] + Vector2.from_angle(freeze_angle - 0.62) * freeze_radius, effect["pos"] + Vector2.from_angle(freeze_angle + 0.62) * freeze_radius]), Color(0.38, 0.78, 1.0, alpha * 0.18))
+		"arsenal_shield":
+			draw_circle(effect["pos"], float(effect["radius"]), Color(0.38, 0.78, 1.0, alpha * 0.08))
+			draw_arc(effect["pos"], float(effect["radius"]) * (0.8 + progress * 0.2), 0.0, TAU, 48, Color(0.55, 0.9, 1.0, alpha), 6.0, true)
 		"shield_break":
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.75 + progress * 0.45), 0.0, TAU, 30, Color(0.35, 0.88, 1.0, alpha), 6.0, true)
+		"elite_chest":
+			var chest_radius := float(effect["radius"]) * progress
+			draw_circle(effect["pos"], chest_radius, Color(1.0, 0.68, 0.12, alpha * 0.12))
+			draw_arc(effect["pos"], chest_radius, -progress * TAU, (1.0 - progress) * TAU, 48, Color(1.0, 0.86, 0.3, alpha), 8.0, true)
 		"elite_explosion":
 			var explosion_radius := float(effect["radius"]) * (0.35 + progress * 0.65)
 			draw_circle(effect["pos"], explosion_radius, Color(1.0, 0.12, 0.2, 0.08 + progress * 0.18))
