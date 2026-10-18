@@ -3,16 +3,16 @@ extends Node2D
 # 五分鐘垂直切片。戰鬥規則沿用既有原型，角色與異變體改用使用者提供的
 # 透明 2D billboard 素材，場景與技能特效仍由 CanvasItem 即時繪製。
 
-const EPATHY_TEXTURE_PATH := "res://assets/sprites/epathy.png"
-const ANUBARAK_TEXTURE_PATH := "res://assets/sprites/anubarak.png"
-const ENEMY_TEXTURE_PATHS := {
-	"chaser": "res://assets/sprites/wolf_fire.png",
-	"dasher": "res://assets/sprites/wolf_ice.png",
-	"shooter": "res://assets/sprites/robot_red.png",
-	"tank": "res://assets/sprites/beetle_fire.png",
-	"guardian": "res://assets/sprites/robot_blue.png",
-	"splitter": "res://assets/sprites/beetle_ice.png",
-	"contaminant": "res://assets/sprites/wolf_spectral.png",
+const EPATHY_TEXTURE: Texture2D = preload("res://assets/sprites/epathy_chibi_v1.png")
+const ANUBARAK_TEXTURE: Texture2D = preload("res://assets/sprites/anubarak_chibi_v1.png")
+const ENEMY_TEXTURES := {
+	"chaser": preload("res://assets/sprites/wolf_mutant_v1.png"),
+	"dasher": preload("res://assets/sprites/wolf_ice.png"),
+	"shooter": preload("res://assets/sprites/robot_combat_v1.png"),
+	"tank": preload("res://assets/sprites/beetle_crystal_v1.png"),
+	"guardian": preload("res://assets/sprites/robot_blue.png"),
+	"splitter": preload("res://assets/sprites/beetle_ice.png"),
+	"contaminant": preload("res://assets/sprites/wolf_spectral.png"),
 }
 const PLAYABLE_CHARACTERS := ["epathy"]
 
@@ -239,19 +239,10 @@ func _ready() -> void:
 
 
 func _load_art_textures() -> void:
-	epathy_texture = _load_png_texture(EPATHY_TEXTURE_PATH)
-	anubarak_texture = _load_png_texture(ANUBARAK_TEXTURE_PATH)
-	for enemy_kind in ENEMY_TEXTURE_PATHS:
-		enemy_textures[enemy_kind] = _load_png_texture(ENEMY_TEXTURE_PATHS[enemy_kind])
-
-
-func _load_png_texture(path: String) -> Texture2D:
-	var image := Image.new()
-	var error := image.load_png_from_buffer(FileAccess.get_file_as_bytes(path))
-	if error != OK:
-		push_error("無法載入美術素材：%s" % path)
-		return null
-	return ImageTexture.create_from_image(image)
+	epathy_texture = EPATHY_TEXTURE
+	anubarak_texture = ANUBARAK_TEXTURE
+	for enemy_kind in ENEMY_TEXTURES:
+		enemy_textures[enemy_kind] = ENEMY_TEXTURES[enemy_kind]
 
 
 func _process(delta: float) -> void:
