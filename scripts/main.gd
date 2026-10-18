@@ -32,8 +32,10 @@ const MAX_PLAYER_PROJECTILES := 220
 const MAX_HOSTILE_PROJECTILES := 180
 const LOW_DETAIL_ENEMY_COUNT := 220
 const DRAW_MARGIN := 180.0
-const MAP_OBJECT_SECTOR := 640.0
 const MAP_OBJECT_RANGE := 76.0
+const MAP_CHEST_COUNT := 4
+const MAP_CHEST_DISTANCE := 820.0
+const MAP_CHEST_ANGLE_SHIFT := 0.647517
 const WAVE_TIMES := [60.0, 120.0, 180.0]
 const VERSION := "2.5D 改版開發版"
 const CHARACTERS := {
@@ -149,6 +151,9 @@ var hud_refresh_timer := 0.0
 var gm_triple_speed := false
 var activated_map_objects: Dictionary = {}
 var nearby_map_object: Dictionary = {}
+var active_map_objects: Array = []
+var map_object_cycle := 0
+var map_object_angle_offset := 0.0
 
 var level := 1
 var experience := 0.0
@@ -902,6 +907,9 @@ func _start_game() -> void:
 	current_upgrade_choices.clear()
 	activated_map_objects.clear()
 	nearby_map_object.clear()
+	active_map_objects.clear()
+	map_object_cycle = 0
+	map_object_angle_offset = rng.randf_range(-0.18, 0.18)
 	interaction_label.visible = false
 	game_time = 0.0
 	spawn_timer = 0.15
@@ -1000,6 +1008,7 @@ func _start_game() -> void:
 	apostle_hp = 0.0
 	apostle_max_hp = 0.0
 	apostle_phase = 1
+	_spawn_map_object_ring(map_object_angle_offset)
 
 	camera.position = player_pos
 	character_overlay.visible = false
@@ -1289,47 +1298,36 @@ func _update_player(delta: float) -> void:
 	player_invulnerable = maxf(0.0, player_invulnerable - delta)
 
 
-func _map_object_key(cell_x: int, cell_y: int) -> String:
-	return "%d:%d" % [cell_x, cell_y]
+func _map_object_name(_kind: String) -> String:
+	return "先遣補給箱"
 
 
-func _map_object_position(cell_x: int, cell_y: int) -> Vector2:
-	return Vector2(cell_x * MAP_OBJECT_SECTOR + 220.0, cell_y * MAP_OBJECT_SECTOR + 110.0)
-
-
-func _map_object_kind(cell_x: int, cell_y: int) -> String:
-	var roll := _terrain_noise(cell_x, cell_y, 17.0)
-	if roll < 0.34:
-		return "repair"
-	if roll < 0.67:
-		return "supply"
-	return "pylon"
-
-
-func _map_object_name(kind: String) -> String:
-	match kind:
-		"repair": return "星源修復站"
-		"supply": return "先遣補給箱"
-		_: return "過載脈衝塔"
+func _spawn_map_object_ring(angle_offset: float) -> void:
+	active_map_objects.clear()
+	nearby_map_object.clear()
+	interaction_label.visible = false
+	map_object_cycle += 1
+	map_object_angle_offset = wrapf(angle_offset, -PI, PI)
+	for chest_index in MAP_CHEST_COUNT:
+		var angle := map_object_angle_offset + TAU * float(chest_index) / float(MAP_CHEST_COUNT)
+		var distance := MAP_CHEST_DISTANCE + rng.randf_range(-65.0, 85.0)
+		active_map_objects.append({
+			"key": "%d:%d" % [map_object_cycle, chest_index],
+			"kind": "supply",
+			"pos": player_pos + Vector2.from_angle(angle) * distance,
+			"angle": angle,
+		})
 
 
 func _nearest_map_object() -> Dictionary:
-	var center_x := int(floorf(player_pos.x / MAP_OBJECT_SECTOR))
-	var center_y := int(floorf(player_pos.y / MAP_OBJECT_SECTOR))
 	var best_distance_squared := INF
 	var best: Dictionary = {}
-	for cell_x in range(center_x - 1, center_x + 2):
-		for cell_y in range(center_y - 1, center_y + 2):
-			var object_position := _map_object_position(cell_x, cell_y)
-			var distance_squared := player_pos.distance_squared_to(object_position)
-			if distance_squared < best_distance_squared:
-				best_distance_squared = distance_squared
-				best = {
-					"key": _map_object_key(cell_x, cell_y),
-					"kind": _map_object_kind(cell_x, cell_y),
-					"pos": object_position,
-					"distance_squared": distance_squared,
-				}
+	for map_object in active_map_objects:
+		var distance_squared := player_pos.distance_squared_to(map_object["pos"])
+		if distance_squared < best_distance_squared:
+			best_distance_squared = distance_squared
+			best = map_object.duplicate()
+			best["distance_squared"] = distance_squared
 	return best
 
 
@@ -1341,11 +1339,7 @@ func _update_map_objects() -> void:
 	var key: String = nearby_map_object["key"]
 	var kind: String = nearby_map_object["kind"]
 	interaction_label.visible = true
-	if activated_map_objects.has(key):
-		interaction_label.text = "%s｜本次任務已使用" % _map_object_name(kind)
-		interaction_label.modulate = Color(0.58, 0.62, 0.62)
-		return
-	interaction_label.text = "[E] 啟動 %s" % _map_object_name(kind)
+	interaction_label.text = "[E] 開啟 %s" % _map_object_name(kind)
 	interaction_label.modulate = Color.WHITE
 	if Input.is_action_just_pressed("interact"):
 		_activate_map_object(nearby_map_object)
@@ -1355,31 +1349,15 @@ func _activate_map_object(map_object: Dictionary) -> void:
 	var key: String = map_object["key"]
 	if activated_map_objects.has(key):
 		return
-	var kind: String = map_object["kind"]
 	var position: Vector2 = map_object["pos"]
 	activated_map_objects[key] = true
-	match kind:
-		"repair":
-			player_health = minf(player_max_health, player_health + 28.0)
-			player_shield = minf(player_max_shield, player_shield + 12.0)
-			effects.append({"kind": "map_repair", "pos": position, "life": 1.0, "total": 1.0, "radius": 118.0})
-			_show_game_notice("星源修復站｜生命 +28、護盾 +12")
-		"supply":
-			rerolls_remaining += 1
-			effects.append({"kind": "map_supply", "pos": position, "life": 1.0, "total": 1.0, "radius": 112.0})
-			_gain_experience(16.0 + level * 1.5)
-			_show_game_notice("先遣補給箱｜獲得星源經驗、重骰 +1")
-		_:
-			var blast_damage := 105.0 + game_time * 0.22
-			var blast_radius := 285.0
-			for enemy_index in range(enemies.size() - 1, -1, -1):
-				var hit_radius := blast_radius + float(enemies[enemy_index]["radius"])
-				if position.distance_squared_to(enemies[enemy_index]["pos"]) <= hit_radius * hit_radius:
-					_damage_enemy(enemy_index, blast_damage, "skill")
-			effects.append({"kind": "map_pylon", "pos": position, "life": 0.9, "total": 0.9, "radius": blast_radius})
-			_show_game_notice("過載脈衝塔｜清掃周圍異變體")
-	interaction_label.text = "%s｜本次任務已使用" % _map_object_name(kind)
-	interaction_label.modulate = Color(0.58, 0.62, 0.62)
+	rerolls_remaining += 1
+	effects.append({"kind": "map_supply", "pos": position, "life": 1.0, "total": 1.0, "radius": 112.0})
+	_gain_experience(16.0 + level * 1.5)
+	_show_game_notice("先遣補給箱｜獲得星源經驗、重骰 +1")
+	var opened_angle: float = float(map_object.get("angle", player_pos.direction_to(position).angle()))
+	var angle_variation := rng.randf_range(-0.11, 0.11)
+	_spawn_map_object_ring(opened_angle + MAP_CHEST_ANGLE_SHIFT + angle_variation)
 
 
 func _update_passive_recovery(delta: float) -> void:
@@ -3194,41 +3172,22 @@ func _draw_background() -> void:
 					crystal + Vector2(0.0, 15.0), crystal + Vector2(-8.0, 6.0),
 				]), Color(0.3, 0.94, 0.68, 0.58))
 
-	# 每個地圖區塊各有一座可互動設施；狀態以區塊座標記錄，不生成額外節點。
-	var sector_x := int(floorf(player_pos.x / MAP_OBJECT_SECTOR))
-	var sector_y := int(floorf(player_pos.y / MAP_OBJECT_SECTOR))
-	for offset_x in range(-2, 3):
-		for offset_y in range(-2, 3):
-			var cell_x := sector_x + offset_x
-			var cell_y := sector_y + offset_y
-			var marker := _map_object_position(cell_x, cell_y)
-			var object_kind := _map_object_kind(cell_x, cell_y)
-			var object_used := activated_map_objects.has(_map_object_key(cell_x, cell_y))
-			var object_color := Color(0.28, 1.0, 0.68)
-			match object_kind:
-				"supply": object_color = Color(1.0, 0.72, 0.22)
-				"pylon": object_color = Color(1.0, 0.3, 0.5)
-			if object_used:
-				object_color = Color(0.34, 0.39, 0.38)
-			draw_ellipse_shadow(marker + Vector2(0.0, 12.0), 70.0, 25.0, Color(0.01, 0.04, 0.04, 0.42))
-			draw_circle(marker, 48.0, Color(0.05, 0.12, 0.12, 0.7))
-			draw_arc(marker, 48.0, 0.0, TAU, 32, Color(object_color, 0.44), 3.0)
-			draw_arc(marker, 34.0, game_time * 0.35, game_time * 0.35 + 4.8, 28, Color(object_color, 0.78), 4.0)
-			match object_kind:
-				"repair":
-					draw_rect(Rect2(marker + Vector2(-5.0, -21.0), Vector2(10.0, 42.0)), object_color)
-					draw_rect(Rect2(marker + Vector2(-21.0, -5.0), Vector2(42.0, 10.0)), object_color)
-				"supply":
-					draw_colored_polygon(PackedVector2Array([
-						marker + Vector2(0.0, -23.0), marker + Vector2(24.0, 0.0),
-						marker + Vector2(0.0, 23.0), marker + Vector2(-24.0, 0.0),
-					]), Color(object_color, 0.88))
-					draw_line(marker + Vector2(-13.0, 0.0), marker + Vector2(13.0, 0.0), Color(0.12, 0.15, 0.11), 5.0)
-				_:
-					draw_circle(marker, 15.0, Color(object_color, 0.9))
-					for spoke_index in 6:
-						var spoke_direction := Vector2.from_angle(TAU * float(spoke_index) / 6.0 + game_time * 0.22)
-						draw_line(marker + spoke_direction * 18.0, marker + spoke_direction * 31.0, object_color, 5.0, true)
+	# 四選一探索寶箱：開啟任一個便清除同組其餘三個，下一組以新的角度環繞玩家生成。
+	for map_object in active_map_objects:
+		var marker: Vector2 = map_object["pos"]
+		if not _is_world_visible(marker, 90.0):
+			continue
+		var object_color := Color(1.0, 0.72, 0.22)
+		var pulse := 1.0 + sin(game_time * 2.4 + float(map_object.get("angle", 0.0))) * 0.05
+		draw_ellipse_shadow(marker + Vector2(0.0, 18.0), 54.0, 20.0, Color(0.01, 0.04, 0.04, 0.42))
+		draw_circle(marker, 49.0 * pulse, Color(1.0, 0.68, 0.16, 0.1))
+		draw_arc(marker, 49.0 * pulse, 0.0, TAU, 32, Color(object_color, 0.42), 3.0)
+		draw_rect(Rect2(marker + Vector2(-27.0, -9.0), Vector2(54.0, 33.0)), Color(0.26, 0.15, 0.2), true)
+		draw_rect(Rect2(marker + Vector2(-27.0, -9.0), Vector2(54.0, 33.0)), object_color, false, 4.0)
+		draw_rect(Rect2(marker + Vector2(-29.0, -22.0), Vector2(58.0, 17.0)), Color(0.38, 0.19, 0.22), true)
+		draw_rect(Rect2(marker + Vector2(-29.0, -22.0), Vector2(58.0, 17.0)), Color(1.0, 0.84, 0.34), false, 4.0)
+		draw_line(marker + Vector2(-27.0, 2.0), marker + Vector2(27.0, 2.0), Color(1.0, 0.86, 0.38), 4.0, true)
+		draw_rect(Rect2(marker + Vector2(-6.0, 3.0), Vector2(12.0, 13.0)), Color(0.48, 0.95, 1.0), true)
 
 
 func _terrain_noise(x: int, y: int, salt: float) -> float:
