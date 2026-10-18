@@ -1,7 +1,20 @@
 extends Node2D
 
-# 五分鐘垂直切片。全部圖像都由 CanvasItem 即時繪製，方便先驗證玩法，
-# 後續可將繪圖函式替換成 GPT 生成的 2D 素材而不更動戰鬥規則。
+# 五分鐘垂直切片。戰鬥規則沿用既有原型，角色與異變體改用使用者提供的
+# 透明 2D billboard 素材，場景與技能特效仍由 CanvasItem 即時繪製。
+
+const EPATHY_TEXTURE_PATH := "res://assets/sprites/epathy.png"
+const ANUBARAK_TEXTURE_PATH := "res://assets/sprites/anubarak.png"
+const ENEMY_TEXTURE_PATHS := {
+	"chaser": "res://assets/sprites/wolf_fire.png",
+	"dasher": "res://assets/sprites/wolf_ice.png",
+	"shooter": "res://assets/sprites/robot_red.png",
+	"tank": "res://assets/sprites/beetle_fire.png",
+	"guardian": "res://assets/sprites/robot_blue.png",
+	"splitter": "res://assets/sprites/beetle_ice.png",
+	"contaminant": "res://assets/sprites/wolf_spectral.png",
+}
+const PLAYABLE_CHARACTERS := ["epathy"]
 
 const RUN_DURATION := 300.0
 const APOSTLE_TIME := 240.0
@@ -18,7 +31,7 @@ const MAX_HOSTILE_PROJECTILES := 180
 const LOW_DETAIL_ENEMY_COUNT := 220
 const DRAW_MARGIN := 180.0
 const WAVE_TIMES := [60.0, 120.0, 180.0]
-const VERSION := "Beta0.13.1"
+const VERSION := "2.5D 改版開發版"
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -68,6 +81,9 @@ const CHARACTERS := {
 
 var rng := RandomNumberGenerator.new()
 var camera: Camera2D
+var epathy_texture: Texture2D
+var anubarak_texture: Texture2D
+var enemy_textures: Dictionary = {}
 
 var player_pos := Vector2.ZERO
 var player_speed := 255.0
@@ -85,7 +101,7 @@ var slow_effect_multiplier := 1.0
 var projectile_area_scale := 1.0
 var projectile_damage_multiplier := 1.0
 var recovery_per_second := 0.0
-var selected_character := "claire"
+var selected_character := "epathy"
 var run_started := false
 var build_open := false
 var total_damage_dealt := 0.0
@@ -205,6 +221,7 @@ var end_summary: Label
 var character_overlay: ColorRect
 var character_detail: Label
 var character_buttons: Dictionary = {}
+var character_portrait: TextureRect
 var gm_panel: PanelContainer
 var gm_speed_button: Button
 var gm_level_button: Button
@@ -214,10 +231,27 @@ var gm_reroll_button: Button
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	rng.randomize()
+	_load_art_textures()
 	_ensure_input_map()
 	_create_camera()
 	_build_interface()
 	_show_character_select()
+
+
+func _load_art_textures() -> void:
+	epathy_texture = _load_png_texture(EPATHY_TEXTURE_PATH)
+	anubarak_texture = _load_png_texture(ANUBARAK_TEXTURE_PATH)
+	for enemy_kind in ENEMY_TEXTURE_PATHS:
+		enemy_textures[enemy_kind] = _load_png_texture(ENEMY_TEXTURE_PATHS[enemy_kind])
+
+
+func _load_png_texture(path: String) -> Texture2D:
+	var image := Image.new()
+	var error := image.load_png_from_buffer(FileAccess.get_file_as_bytes(path))
+	if error != OK:
+		push_error("無法載入美術素材：%s" % path)
+		return null
+	return ImageTexture.create_from_image(image)
 
 
 func _process(delta: float) -> void:
@@ -382,7 +416,7 @@ func _build_interface() -> void:
 	boss_label.offset_top = 108.0
 	boss_label.offset_bottom = 138.0
 	boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	boss_label.text = "測試使徒"
+	boss_label.text = "使徒｜阿努巴拉克"
 	boss_label.add_theme_font_size_override("font_size", 18)
 	boss_label.visible = false
 	hud.add_child(boss_label)
@@ -656,7 +690,7 @@ func _build_loadout_overlay() -> void:
 func _build_character_overlay() -> void:
 	character_overlay = ColorRect.new()
 	character_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	character_overlay.color = Color(0.008, 0.015, 0.045, 0.98)
+	character_overlay.color = Color(0.035, 0.055, 0.055, 0.99)
 	character_overlay.theme = ui_theme
 	character_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	canvas_layer.add_child(character_overlay)
@@ -667,62 +701,87 @@ func _build_character_overlay() -> void:
 	character_overlay.add_child(center)
 
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(1180.0, 640.0)
+	panel.custom_minimum_size = Vector2(1100.0, 650.0)
 	center.add_child(panel)
 
 	var column := VBoxContainer.new()
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.add_theme_constant_override("separation", 16)
+	column.add_theme_constant_override("separation", 12)
 	panel.add_child(column)
 
 	var title := Label.new()
-	title.text = "星隕倖存者"
+	title.text = "星隕倖存者｜荒原先遣"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 42)
+	title.add_theme_font_size_override("font_size", 38)
 	column.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "選擇本次出擊角色｜五分鐘原型"
+	subtitle.text = "2.5D 改版測試｜埃帕蒂單角色垂直切片"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	subtitle.add_theme_font_size_override("font_size", 20)
+	subtitle.add_theme_font_size_override("font_size", 18)
 	column.add_child(subtitle)
 
-	var cards := HBoxContainer.new()
-	cards.alignment = BoxContainer.ALIGNMENT_CENTER
-	cards.add_theme_constant_override("separation", 12)
-	cards.process_mode = Node.PROCESS_MODE_ALWAYS
-	column.add_child(cards)
+	var content := HBoxContainer.new()
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_theme_constant_override("separation", 34)
+	column.add_child(content)
 
-	for character_id in CHARACTERS:
+	var portrait_frame := PanelContainer.new()
+	portrait_frame.custom_minimum_size = Vector2(400.0, 440.0)
+	content.add_child(portrait_frame)
+
+	character_portrait = TextureRect.new()
+	character_portrait.texture = epathy_texture
+	character_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	character_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	character_portrait.custom_minimum_size = Vector2(380.0, 420.0)
+	character_portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	portrait_frame.add_child(character_portrait)
+
+	var details := VBoxContainer.new()
+	details.custom_minimum_size = Vector2(560.0, 440.0)
+	details.alignment = BoxContainer.ALIGNMENT_CENTER
+	details.add_theme_constant_override("separation", 16)
+	content.add_child(details)
+
+	for character_id in PLAYABLE_CHARACTERS:
 		var data: Dictionary = CHARACTERS[character_id]
 		var button := Button.new()
-		button.custom_minimum_size = Vector2(268.0, 250.0)
-		button.text = "%s\n%s\n\n%s\n\n自動能力｜%s" % [data["name"], data["role"], data["passive"], data["starter_weapon"]]
+		button.custom_minimum_size = Vector2(520.0, 70.0)
+		button.text = "%s　｜　%s" % [data["name"], data["role"]]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.add_theme_font_size_override("font_size", 16)
+		button.add_theme_font_size_override("font_size", 22)
 		button.process_mode = Node.PROCESS_MODE_ALWAYS
 		button.pressed.connect(_choose_character.bind(character_id))
-		cards.add_child(button)
+		details.add_child(button)
 		character_buttons[character_id] = button
 
 	character_detail = Label.new()
-	character_detail.custom_minimum_size = Vector2(0.0, 82.0)
-	character_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	character_detail.custom_minimum_size = Vector2(520.0, 180.0)
+	character_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	character_detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	character_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	character_detail.add_theme_font_size_override("font_size", 18)
-	column.add_child(character_detail)
+	details.add_child(character_detail)
+
+	var evolution_hint := Label.new()
+	evolution_hint.text = "二階進化｜暫以青綠星源光效與強化刀光呈現"
+	evolution_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	evolution_hint.add_theme_color_override("font_color", Color(0.55, 1.0, 0.78))
+	evolution_hint.add_theme_font_size_override("font_size", 17)
+	details.add_child(evolution_hint)
 
 	var start_button := Button.new()
-	start_button.text = "開始出擊"
-	start_button.custom_minimum_size = Vector2(320.0, 62.0)
+	start_button.text = "進入星蝕荒原"
+	start_button.custom_minimum_size = Vector2(360.0, 64.0)
 	start_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	start_button.add_theme_font_size_override("font_size", 24)
 	start_button.process_mode = Node.PROCESS_MODE_ALWAYS
 	start_button.pressed.connect(_start_game)
-	column.add_child(start_button)
+	details.add_child(start_button)
 
 	var disclaimer := Label.new()
-	disclaimer.text = "%s｜免費、非商業、非官方同人原型" % VERSION
+	disclaimer.text = "%s｜免費、非商業、非官方同人原型｜美術素材由使用者提供" % VERSION
 	disclaimer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	disclaimer.add_theme_font_size_override("font_size", 14)
 	column.add_child(disclaimer)
@@ -735,9 +794,8 @@ func _choose_character(character_id: String) -> void:
 		return
 	selected_character = character_id
 	var data: Dictionary = CHARACTERS[selected_character]
-	character_detail.text = "%s｜%s\n自動能力｜%s：%s\n%s" % [
-		data["name"], data["role"], data["starter_weapon"], data["starter_trait"],
-		data["skill"],
+	character_detail.text = "先遣角色｜%s\n\n被動｜%s\n自動武器｜%s\n%s\n\n%s" % [
+		data["name"], data["passive"], data["starter_weapon"], data["starter_trait"], data["skill"],
 	]
 	for button_id in character_buttons:
 		var button: Button = character_buttons[button_id]
@@ -2430,7 +2488,7 @@ func _update_interface(delta: float) -> void:
 	hud_refresh_timer = 0.1
 	var minutes := int(game_time) / 60
 	var seconds := int(game_time) % 60
-	time_label.text = "%02d:%02d" % [minutes, seconds]
+	time_label.text = "星蝕荒原　區域 1 / 1\n%02d:%02d" % [minutes, seconds]
 	var character_name: String = CHARACTERS[selected_character]["name"]
 	stats_label.text = "%s　Lv.%d\n生命 %d / %d　護盾 %d\n護甲 %d　擊殺 %d" % [
 		character_name,
@@ -2588,30 +2646,86 @@ func _is_world_visible(position: Vector2, margin: float = DRAW_MARGIN) -> bool:
 
 
 func _draw_background() -> void:
-	var grid_size := 96.0
-	var left := floorf((player_pos.x - 760.0) / grid_size) * grid_size
-	var right := player_pos.x + 760.0
-	var top := floorf((player_pos.y - 460.0) / grid_size) * grid_size
-	var bottom := player_pos.y + 460.0
-	var grid_color := Color(0.085, 0.14, 0.22, 0.42)
-	var x := left
-	while x <= right:
-		draw_line(Vector2(x, top), Vector2(x, bottom), grid_color, 1.0)
-		x += grid_size
-	var y := top
-	while y <= bottom:
-		draw_line(Vector2(left, y), Vector2(right, y), grid_color, 1.0)
-		y += grid_size
+	var tile_size := 160.0
+	var left := floorf((player_pos.x - 780.0) / tile_size) * tile_size
+	var right := player_pos.x + 780.0
+	var top := floorf((player_pos.y - 480.0) / tile_size) * tile_size
+	var bottom := player_pos.y + 480.0
+	draw_rect(Rect2(left, top, right - left, bottom - top), Color(0.18, 0.21, 0.16))
 
-	# 方舟設施地板的簡化標記。
-	var sector := 384.0
+	var start_x := int(floorf(left / tile_size))
+	var end_x := int(ceilf(right / tile_size))
+	var start_y := int(floorf(top / tile_size))
+	var end_y := int(ceilf(bottom / tile_size))
+	for cell_x in range(start_x, end_x + 1):
+		for cell_y in range(start_y, end_y + 1):
+			var origin := Vector2(cell_x * tile_size, cell_y * tile_size)
+			var noise := _terrain_noise(cell_x, cell_y, 0.0)
+			var tile_color := Color(0.23, 0.25, 0.17) if noise > 0.48 else Color(0.19, 0.23, 0.17)
+			draw_colored_polygon(PackedVector2Array([
+				origin + Vector2(2.0, 10.0), origin + Vector2(tile_size - 8.0, 0.0),
+				origin + Vector2(tile_size, tile_size - 14.0), origin + Vector2(12.0, tile_size),
+			]), tile_color)
+			draw_line(origin + Vector2(0.0, tile_size), origin + Vector2(tile_size, tile_size - 8.0), Color(0.07, 0.1, 0.08, 0.22), 2.0)
+
+			if noise > 0.72:
+				var rock_center := origin + Vector2(30.0 + _terrain_noise(cell_x, cell_y, 1.0) * 96.0, 34.0 + _terrain_noise(cell_x, cell_y, 2.0) * 82.0)
+				var rock_scale := 12.0 + _terrain_noise(cell_x, cell_y, 3.0) * 18.0
+				draw_ellipse_shadow(rock_center + Vector2(8.0, 10.0), rock_scale * 1.2, rock_scale * 0.42, Color(0.02, 0.035, 0.03, 0.35))
+				draw_colored_polygon(PackedVector2Array([
+					rock_center + Vector2(-rock_scale, rock_scale * 0.3),
+					rock_center + Vector2(-rock_scale * 0.45, -rock_scale * 0.7),
+					rock_center + Vector2(rock_scale * 0.55, -rock_scale * 0.5),
+					rock_center + Vector2(rock_scale, rock_scale * 0.45),
+				]), Color(0.27, 0.3, 0.26))
+				draw_line(rock_center + Vector2(-rock_scale * 0.4, -rock_scale * 0.45), rock_center + Vector2(rock_scale * 0.45, -rock_scale * 0.3), Color(0.43, 0.46, 0.36, 0.55), 3.0)
+
+			if _terrain_noise(cell_x, cell_y, 4.0) > 0.78:
+				var crystal := origin + Vector2(45.0 + _terrain_noise(cell_x, cell_y, 5.0) * 70.0, 44.0 + _terrain_noise(cell_x, cell_y, 6.0) * 64.0)
+				draw_circle(crystal, 22.0, Color(0.12, 0.46, 0.38, 0.1))
+				draw_colored_polygon(PackedVector2Array([
+					crystal + Vector2(0.0, -18.0), crystal + Vector2(9.0, 7.0),
+					crystal + Vector2(0.0, 15.0), crystal + Vector2(-8.0, 6.0),
+				]), Color(0.3, 0.94, 0.68, 0.58))
+
+	# 規律出現的星源觀測平台，暫時作為未來地圖事件的視覺錨點。
+	var sector := 640.0
 	var sector_x := floorf(player_pos.x / sector) * sector
 	var sector_y := floorf(player_pos.y / sector) * sector
 	for offset_x in range(-2, 3):
 		for offset_y in range(-2, 3):
-			var marker := Vector2(sector_x + offset_x * sector, sector_y + offset_y * sector)
-			draw_arc(marker, 42.0, 0.0, TAU, 32, Color(0.12, 0.32, 0.43, 0.28), 3.0)
-			draw_line(marker - Vector2(28.0, 0.0), marker + Vector2(28.0, 0.0), Color(0.12, 0.32, 0.43, 0.22), 2.0)
+			var marker := Vector2(sector_x + offset_x * sector + 220.0, sector_y + offset_y * sector + 110.0)
+			draw_ellipse_shadow(marker + Vector2(0.0, 12.0), 70.0, 25.0, Color(0.01, 0.04, 0.04, 0.42))
+			draw_circle(marker, 48.0, Color(0.05, 0.12, 0.12, 0.7))
+			draw_arc(marker, 48.0, 0.0, TAU, 32, Color(0.22, 0.82, 0.66, 0.34), 3.0)
+			draw_arc(marker, 31.0, game_time * 0.2, game_time * 0.2 + 4.8, 28, Color(0.48, 1.0, 0.78, 0.26), 3.0)
+
+
+func _terrain_noise(x: int, y: int, salt: float) -> float:
+	var value := sin(float(x) * 12.9898 + float(y) * 78.233 + salt * 37.719) * 43758.5453
+	return value - floorf(value)
+
+
+func draw_ellipse_shadow(center: Vector2, radius_x: float, radius_y: float, color: Color) -> void:
+	var points := PackedVector2Array()
+	for point_index in 24:
+		var angle := TAU * float(point_index) / 24.0
+		points.append(center + Vector2(cos(angle) * radius_x, sin(angle) * radius_y))
+	draw_colored_polygon(points, color)
+
+
+func _draw_sprite_billboard(texture: Texture2D, feet_position: Vector2, target_height: float, modulate: Color = Color.WHITE, lift: float = 0.0) -> void:
+	if texture == null:
+		return
+	var texture_size := texture.get_size()
+	var target_width := target_height * texture_size.x / maxf(1.0, texture_size.y)
+	var rect := Rect2(
+		feet_position.x - target_width * 0.5,
+		feet_position.y - target_height + 12.0 - lift,
+		target_width,
+		target_height
+	)
+	draw_texture_rect(texture, rect, false, modulate)
 
 
 func _draw_enemy(enemy: Dictionary) -> void:
@@ -2621,12 +2735,10 @@ func _draw_enemy(enemy: Dictionary) -> void:
 	var low_detail := enemies.size() >= LOW_DETAIL_ENEMY_COUNT
 	if enemy["boss"]:
 		var boss_color := (Color(1.0, 0.16, 0.22) if int(enemy.get("phase", 1)) >= 2 else Color(1.0, 0.24, 0.52)) if not flash else Color.WHITE
-		draw_circle(position, radius, Color(boss_color, 0.28))
-		draw_arc(position, radius, 0.0, TAU, 48, boss_color, 7.0, true)
-		draw_arc(position, radius * 0.64, game_time, game_time + TAU * 0.74, 38, Color(0.9, 0.55, 1.0), 5.0, true)
-		for spoke in 6:
-			var angle := TAU * float(spoke) / 6.0 + game_time * 0.25
-			draw_line(position + Vector2.from_angle(angle) * (radius * 0.7), position + Vector2.from_angle(angle) * (radius * 1.22), boss_color, 4.0)
+		draw_ellipse_shadow(position + Vector2(0.0, 13.0), 82.0, 25.0, Color(0.01, 0.015, 0.02, 0.58))
+		draw_circle(position, radius + 12.0, Color(boss_color, 0.14))
+		draw_arc(position, radius + 16.0, game_time * 0.5, game_time * 0.5 + TAU * 0.78, 48, boss_color, 6.0, true)
+		_draw_sprite_billboard(anubarak_texture, position + Vector2(0.0, 20.0), 178.0, Color(1.7, 1.7, 1.7, 1.0) if flash else Color.WHITE)
 		var burst_charge: float = float(enemy.get("burst_charge", 0.0))
 		if burst_charge > 0.0:
 			var charge_progress := clampf(1.0 - burst_charge / 0.85, 0.0, 1.0)
@@ -2691,6 +2803,9 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		base_color = base_color.lerp(Color(0.35, 0.72, 1.0), 0.52)
 	if flash:
 		base_color = Color.WHITE
+	var enemy_texture: Texture2D = enemy_textures.get(enemy["kind"], enemy_textures.get("chaser"))
+	draw_ellipse_shadow(position + Vector2(0.0, radius * 0.42), radius * 1.45, radius * 0.48, Color(0.01, 0.025, 0.025, 0.42))
+	_draw_sprite_billboard(enemy_texture, position + Vector2(0.0, radius * 0.55), radius * 3.8, Color(1.8, 1.8, 1.8, 1.0) if flash else Color.WHITE)
 	match enemy["kind"]:
 		"dasher":
 			if float(enemy.get("dash_charge", 0.0)) > 0.0:
@@ -2699,13 +2814,6 @@ func _draw_enemy(enemy: Dictionary) -> void:
 				draw_line(position, position + dash_direction * (130.0 if low_detail else 165.0), Color(1.0, 0.42, 0.12, telegraph_alpha), 5.0 if low_detail else 7.0, true)
 				if not low_detail:
 					draw_arc(position, radius + 8.0, 0.0, TAU, 24, Color(1.0, 0.75, 0.2, telegraph_alpha), 4.0, true)
-			var dasher_points := PackedVector2Array([
-				position + Vector2(0.0, -radius),
-				position + Vector2(radius, 0.0),
-				position + Vector2(0.0, radius),
-				position + Vector2(-radius, 0.0),
-			])
-			draw_colored_polygon(dasher_points, base_color)
 		"shooter":
 			if float(enemy.get("shot_charge", 0.0)) > 0.0:
 				var aim_alpha := 0.45 + 0.4 * sin(float(enemy["shot_charge"]) * 28.0)
@@ -2713,37 +2821,8 @@ func _draw_enemy(enemy: Dictionary) -> void:
 				draw_line(position, position + shot_direction * (320.0 if low_detail else 520.0), Color(0.78, 0.35, 1.0, aim_alpha), 2.0 if low_detail else 3.0, true)
 				if not low_detail:
 					draw_arc(position, radius + 7.0, 0.0, TAU, 22, Color(0.9, 0.62, 1.0, aim_alpha), 3.0, true)
-			var shooter_points := PackedVector2Array([
-				position + Vector2(0.0, -radius),
-				position + Vector2(radius, radius * 0.82),
-				position + Vector2(-radius, radius * 0.82),
-			])
-			draw_colored_polygon(shooter_points, base_color)
-			if not low_detail:
-				draw_circle(position, 4.0, Color(0.08, 0.02, 0.12))
-		"tank":
-			draw_rect(Rect2(position - Vector2(radius * 0.82, radius * 0.72), Vector2(radius * 1.64, radius * 1.44)), base_color)
-			if not low_detail:
-				draw_arc(position, radius, 0.0, TAU, 24, Color(1.0, 0.58, 0.4), 4.0, true)
-		"guardian":
-			draw_circle(position, radius, Color(base_color, 0.34))
-			draw_arc(position, radius, 0.0, TAU, 28, base_color, 6.0, true)
-			draw_arc(position, radius * 0.62, -0.8, 3.9, 22, Color(0.75, 0.95, 1.0), 4.0, true)
-		"splitter":
-			draw_circle(position + Vector2(-radius * 0.34, 0.0), radius * 0.72, base_color)
-			draw_circle(position + Vector2(radius * 0.34, 0.0), radius * 0.72, base_color.darkened(0.18))
-			if not low_detail:
-				draw_line(position + Vector2(0.0, -radius), position + Vector2(0.0, radius), Color(1.0, 0.72, 0.9), 3.0, true)
 		"contaminant":
-			draw_circle(position, radius, base_color)
 			draw_arc(position, radius + 4.0, game_time * 1.4, game_time * 1.4 + 4.8, 24, Color(0.72, 1.0, 0.35), 4.0, true)
-			if not low_detail:
-				draw_circle(position, radius * 0.35, Color(0.04, 0.18, 0.06))
-		_:
-			draw_circle(position, radius, base_color)
-			if not low_detail:
-				draw_circle(position + Vector2(-5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
-				draw_circle(position + Vector2(5.0, -3.0), 2.5, Color(0.03, 0.02, 0.06))
 	if enemy["elite"]:
 		var affix_color := Color(1.0, 0.86, 0.22)
 		match enemy.get("elite_affix", ""):
@@ -2851,14 +2930,20 @@ func _draw_effect(effect: Dictionary) -> void:
 
 func _draw_player() -> void:
 	var flicker := player_invulnerable > 0.0 and int(player_invulnerable * 24.0) % 2 == 0
-	var character_color: Color = CHARACTERS[selected_character]["color"]
-	var body_color := Color(character_color, 0.35 if flicker else 1.0)
-	draw_circle(player_pos, 18.0, body_color)
-	draw_arc(player_pos, 23.0, -0.9, 3.9, 30, Color(0.74, 0.96, 1.0, 0.85), 5.0, true)
-	draw_line(player_pos + Vector2(-10.0, 12.0), player_pos + Vector2(13.0, -14.0), Color(0.85, 0.98, 1.0), 4.0, true)
+	var sprite_modulate := Color(1.0, 1.0, 1.0, 0.34 if flicker else 1.0)
+	draw_ellipse_shadow(player_pos + Vector2(0.0, 13.0), 31.0, 10.0, Color(0.01, 0.02, 0.02, 0.52))
+	if scythe_evolved:
+		var aura_pulse := 1.0 + sin(game_time * 5.0) * 0.1
+		draw_circle(player_pos + Vector2(0.0, -26.0), 47.0 * aura_pulse, Color(0.25, 1.0, 0.72, 0.09))
+		draw_arc(player_pos + Vector2(0.0, -20.0), 42.0 * aura_pulse, game_time, game_time + 5.1, 40, Color(0.48, 1.0, 0.82, 0.72), 4.0, true)
+	_draw_sprite_billboard(epathy_texture, player_pos + Vector2(0.0, 13.0), 118.0, sprite_modulate)
+	draw_arc(player_pos, 28.0, -0.9, 3.9, 30, Color(0.4, 1.0, 0.78, 0.68), 4.0, true)
 	if player_shield > 0.0:
 		var shield_alpha := 0.22 + 0.38 * (player_shield / player_max_shield)
-		draw_arc(player_pos, 30.0, 0.0, TAU, 36, Color(0.3, 0.78, 1.0, shield_alpha), 3.0, true)
+		draw_arc(player_pos, 34.0, 0.0, TAU, 36, Color(0.3, 0.78, 1.0, shield_alpha), 3.0, true)
+	var health_ratio := clampf(player_health / maxf(1.0, player_max_health), 0.0, 1.0)
+	draw_rect(Rect2(player_pos + Vector2(-30.0, 25.0), Vector2(60.0, 7.0)), Color(0.025, 0.04, 0.035, 0.88))
+	draw_rect(Rect2(player_pos + Vector2(-29.0, 26.0), Vector2(58.0 * health_ratio, 5.0)), Color(0.25, 0.92, 0.55))
 	if drone_level > 0:
 		var drone_pos := player_pos + Vector2.from_angle(game_time * 2.2) * 42.0
 		draw_line(player_pos, drone_pos, Color(1.0, 0.78, 0.2, 0.2), 2.0, true)
