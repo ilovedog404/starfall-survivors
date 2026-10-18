@@ -14,6 +14,9 @@ func _run() -> void:
 
 	var game = packed_scene.instantiate()
 	get_tree().root.add_child(game)
+	if game.battle_music_player == null or game.battle_music_player.stream == null or game.battle_music_player.playing:
+		_fail("戰鬥音樂沒有正確初始化，或在角色選擇頁提前播放")
+		return
 	if not InputMap.action_has_event("build", _key_event(KEY_B)) or not InputMap.action_has_event("pause", _key_event(KEY_P)):
 		_fail("瀏覽器替代鍵 B／P 沒有註冊")
 		return
@@ -33,6 +36,9 @@ func _run() -> void:
 		return
 	game._choose_character("lucia")
 	game._start_game()
+	if not game.battle_music_player.playing:
+		_fail("進入戰場後沒有開始播放背景音樂")
+		return
 	game._spawn_mutant("chaser")
 	game.enemies[0]["pos"] = game.player_pos + Vector2(40.0, 0.0)
 	game.enemies[0]["hp"] = 500.0
@@ -62,6 +68,9 @@ func _run() -> void:
 		return
 
 	game._show_character_select()
+	if game.battle_music_player.playing:
+		_fail("返回角色選擇後背景音樂沒有停止")
+		return
 	game._choose_character("rafari")
 	game._start_game()
 	game._spawn_mutant("chaser")

@@ -5,14 +5,15 @@ extends Node2D
 
 const EPATHY_TEXTURE: Texture2D = preload("res://assets/sprites/epathy_chibi_v1.png")
 const ANUBARAK_TEXTURE: Texture2D = preload("res://assets/sprites/anubarak_chibi_v1.png")
+const BATTLE_MUSIC: AudioStream = preload("res://assets/audio/shissen_no_kairou.wav")
 const ENEMY_TEXTURES := {
-	"chaser": preload("res://assets/sprites/wolf_mutant_v1.png"),
-	"dasher": preload("res://assets/sprites/wolf_ice.png"),
-	"shooter": preload("res://assets/sprites/robot_combat_v1.png"),
-	"tank": preload("res://assets/sprites/beetle_crystal_v1.png"),
-	"guardian": preload("res://assets/sprites/robot_blue.png"),
-	"splitter": preload("res://assets/sprites/beetle_ice.png"),
-	"contaminant": preload("res://assets/sprites/wolf_spectral.png"),
+	"chaser": preload("res://assets/sprites/wolf_mutant_chibi_v2.png"),
+	"dasher": preload("res://assets/sprites/wolf_mutant_chibi_v2.png"),
+	"shooter": preload("res://assets/sprites/robot_combat_chibi_v2.png"),
+	"tank": preload("res://assets/sprites/beetle_crystal_chibi_v2.png"),
+	"guardian": preload("res://assets/sprites/robot_combat_chibi_v2.png"),
+	"splitter": preload("res://assets/sprites/beetle_crystal_chibi_v2.png"),
+	"contaminant": preload("res://assets/sprites/wolf_mutant_chibi_v2.png"),
 }
 const PLAYABLE_CHARACTERS := ["epathy"]
 
@@ -81,6 +82,7 @@ const CHARACTERS := {
 
 var rng := RandomNumberGenerator.new()
 var camera: Camera2D
+var battle_music_player: AudioStreamPlayer
 var epathy_texture: Texture2D
 var anubarak_texture: Texture2D
 var enemy_textures: Dictionary = {}
@@ -232,6 +234,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	rng.randomize()
 	_load_art_textures()
+	_setup_battle_music()
 	_ensure_input_map()
 	_create_camera()
 	_build_interface()
@@ -243,6 +246,32 @@ func _load_art_textures() -> void:
 	anubarak_texture = ANUBARAK_TEXTURE
 	for enemy_kind in ENEMY_TEXTURES:
 		enemy_textures[enemy_kind] = ENEMY_TEXTURES[enemy_kind]
+
+
+func _setup_battle_music() -> void:
+	battle_music_player = AudioStreamPlayer.new()
+	battle_music_player.name = "BattleMusic"
+	battle_music_player.stream = BATTLE_MUSIC
+	battle_music_player.volume_db = -10.0
+	battle_music_player.process_mode = Node.PROCESS_MODE_ALWAYS
+	battle_music_player.finished.connect(_on_battle_music_finished)
+	add_child(battle_music_player)
+
+
+func _start_battle_music() -> void:
+	if battle_music_player.playing:
+		battle_music_player.stop()
+	battle_music_player.play()
+
+
+func _stop_battle_music() -> void:
+	if battle_music_player.playing:
+		battle_music_player.stop()
+
+
+func _on_battle_music_finished() -> void:
+	if run_started and not game_over:
+		battle_music_player.play()
 
 
 func _process(delta: float) -> void:
@@ -795,6 +824,7 @@ func _choose_character(character_id: String) -> void:
 
 func _show_character_select() -> void:
 	_set_gm_speed(false)
+	_stop_battle_music()
 	get_tree().paused = true
 	run_started = false
 	game_over = false
@@ -831,6 +861,7 @@ func _start_game() -> void:
 	instruction_time = 10.0
 	wave_index = 0
 	hud_refresh_timer = 0.0
+	_start_battle_music()
 
 	player_pos = Vector2.ZERO
 	player_speed = 255.0
@@ -2533,6 +2564,7 @@ func _finish_game(victory: bool) -> void:
 	if game_over:
 		return
 	game_over = true
+	_stop_battle_music()
 	_set_gm_speed(false)
 	gm_panel.visible = false
 	get_tree().paused = true
@@ -2796,7 +2828,7 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		base_color = Color.WHITE
 	var enemy_texture: Texture2D = enemy_textures.get(enemy["kind"], enemy_textures.get("chaser"))
 	draw_ellipse_shadow(position + Vector2(0.0, radius * 0.42), radius * 1.45, radius * 0.48, Color(0.01, 0.025, 0.025, 0.42))
-	_draw_sprite_billboard(enemy_texture, position + Vector2(0.0, radius * 0.55), radius * 3.8, Color(1.8, 1.8, 1.8, 1.0) if flash else Color.WHITE)
+	_draw_sprite_billboard(enemy_texture, position + Vector2(0.0, radius * 0.55), radius * 3.3, Color(1.8, 1.8, 1.8, 1.0) if flash else Color.WHITE)
 	match enemy["kind"]:
 		"dasher":
 			if float(enemy.get("dash_charge", 0.0)) > 0.0:
@@ -2927,7 +2959,7 @@ func _draw_player() -> void:
 		var aura_pulse := 1.0 + sin(game_time * 5.0) * 0.1
 		draw_circle(player_pos + Vector2(0.0, -26.0), 47.0 * aura_pulse, Color(0.25, 1.0, 0.72, 0.09))
 		draw_arc(player_pos + Vector2(0.0, -20.0), 42.0 * aura_pulse, game_time, game_time + 5.1, 40, Color(0.48, 1.0, 0.82, 0.72), 4.0, true)
-	_draw_sprite_billboard(epathy_texture, player_pos + Vector2(0.0, 13.0), 118.0, sprite_modulate)
+	_draw_sprite_billboard(epathy_texture, player_pos + Vector2(0.0, 11.0), 94.0, sprite_modulate)
 	draw_arc(player_pos, 28.0, -0.9, 3.9, 30, Color(0.4, 1.0, 0.78, 0.68), 4.0, true)
 	if player_shield > 0.0:
 		var shield_alpha := 0.22 + 0.38 * (player_shield / player_max_shield)
