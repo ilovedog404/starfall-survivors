@@ -24,9 +24,9 @@ func _run() -> void:
 		game.set_process(false)
 		game._choose_character(character_id)
 		game._start_game()
-		game.scythe_level = 5
+		game.scythe_level = game._starter_max_level()
 		var passive_id: String = game._starter_evolution_data()["passive_id"]
-		game.meta_levels[passive_id] = 3
+		game.meta_levels[passive_id] = game._starter_passive_required_level()
 		game.evolution_cores_owned = 1
 		var old_radius: float = game.scythe_radius
 		var old_interval: float = game.scythe_interval
@@ -48,14 +48,23 @@ func _run() -> void:
 		game.projectiles.clear()
 		match character_id:
 			"epathy":
+				game.player_health = game.player_max_health - 10.0
+				var health_before_slash: float = game.player_health
 				_spawn_test_enemy(game, Vector2(90.0, 0.0))
 				_spawn_test_enemy(game, Vector2(-90.0, 0.0))
 				game._fire_scythe_ring()
 				if game.enemies.size() != 2 or float(game.enemies[0]["hp"]) >= 500.0 or float(game.enemies[1]["hp"]) >= 500.0:
 					_fail("疾風環斬沒有同時命中前後敵人")
 					return
-				if game.effects.size() != 2:
+				var slash_effect_count := 0
+				for effect in game.effects:
+					if effect.get("kind", "") == "slash":
+						slash_effect_count += 1
+				if slash_effect_count != 2:
 					_fail("疾風環斬沒有顯示雙向連斬")
+					return
+				if game.player_health <= health_before_slash:
+					_fail("疾風環斬命中後沒有回復生命")
 					return
 			"lucia":
 				_spawn_test_enemy(game, Vector2(120.0, 0.0))

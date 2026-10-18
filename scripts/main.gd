@@ -31,6 +31,8 @@ const MAX_PLAYER_PROJECTILES := 220
 const MAX_HOSTILE_PROJECTILES := 180
 const LOW_DETAIL_ENEMY_COUNT := 220
 const DRAW_MARGIN := 180.0
+const MAP_OBJECT_SECTOR := 640.0
+const MAP_OBJECT_RANGE := 76.0
 const WAVE_TIMES := [60.0, 120.0, 180.0]
 const VERSION := "2.5D 改版開發版"
 const CHARACTERS := {
@@ -131,6 +133,8 @@ var instruction_time := 10.0
 var wave_index := 0
 var hud_refresh_timer := 0.0
 var gm_triple_speed := false
+var activated_map_objects: Dictionary = {}
+var nearby_map_object: Dictionary = {}
 
 var level := 1
 var experience := 0.0
@@ -204,6 +208,7 @@ var stats_label: Label
 var enemy_label: Label
 var weapon_label: Label
 var instruction_label: Label
+var interaction_label: Label
 var skill_label: Label
 var pause_overlay: ColorRect
 var xp_bar: ProgressBar
@@ -224,6 +229,7 @@ var character_overlay: ColorRect
 var character_detail: Label
 var character_buttons: Dictionary = {}
 var character_portrait: TextureRect
+var character_start_button: Button
 var gm_panel: PanelContainer
 var gm_speed_button: Button
 var gm_level_button: Button
@@ -285,6 +291,7 @@ func _process(delta: float) -> void:
 		return
 
 	_update_player(delta)
+	_update_map_objects()
 	_update_passive_recovery(delta)
 	_update_spawning(delta)
 	_update_weapons(delta)
@@ -313,6 +320,7 @@ func _ensure_input_map() -> void:
 		"upgrade_3": [KEY_3],
 		"reroll": [KEY_R],
 		"build": [KEY_TAB, KEY_B],
+		"interact": [KEY_E],
 	}
 	for action_name in bindings:
 		if not InputMap.has_action(action_name):
@@ -418,8 +426,23 @@ func _build_interface() -> void:
 	instruction_label.offset_bottom = -20.0
 	instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	instruction_label.add_theme_font_size_override("font_size", 20)
-	instruction_label.text = "WASD／方向鍵移動　武器自動攻擊　B／Tab 建構　Esc／P 暫停"
+	instruction_label.text = "WASD／方向鍵移動　E 互動　B／Tab 建構　Esc／P 暫停"
 	hud.add_child(instruction_label)
+
+	interaction_label = Label.new()
+	interaction_label.anchor_left = 0.5
+	interaction_label.anchor_right = 0.5
+	interaction_label.anchor_top = 1.0
+	interaction_label.anchor_bottom = 1.0
+	interaction_label.offset_left = -330.0
+	interaction_label.offset_top = -108.0
+	interaction_label.offset_right = 330.0
+	interaction_label.offset_bottom = -68.0
+	interaction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	interaction_label.add_theme_font_size_override("font_size", 20)
+	interaction_label.add_theme_color_override("font_color", Color(0.66, 1.0, 0.82))
+	interaction_label.visible = false
+	hud.add_child(interaction_label)
 
 	boss_bar = ProgressBar.new()
 	boss_bar.anchor_left = 0.25
@@ -791,14 +814,14 @@ func _build_character_overlay() -> void:
 	evolution_hint.add_theme_font_size_override("font_size", 17)
 	details.add_child(evolution_hint)
 
-	var start_button := Button.new()
-	start_button.text = "進入星蝕荒原"
-	start_button.custom_minimum_size = Vector2(360.0, 64.0)
-	start_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	start_button.add_theme_font_size_override("font_size", 24)
-	start_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	start_button.pressed.connect(_start_game)
-	details.add_child(start_button)
+	character_start_button = Button.new()
+	character_start_button.text = "進入星蝕荒原"
+	character_start_button.custom_minimum_size = Vector2(360.0, 64.0)
+	character_start_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	character_start_button.add_theme_font_size_override("font_size", 24)
+	character_start_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	character_start_button.pressed.connect(_start_game)
+	details.add_child(character_start_button)
 
 	var disclaimer := Label.new()
 	disclaimer.text = "%s｜免費、非商業、非官方同人原型｜美術素材由使用者提供" % VERSION
@@ -825,6 +848,7 @@ func _choose_character(character_id: String) -> void:
 func _show_character_select() -> void:
 	_set_gm_speed(false)
 	_stop_battle_music()
+	interaction_label.visible = false
 	get_tree().paused = true
 	run_started = false
 	game_over = false
@@ -838,6 +862,7 @@ func _show_character_select() -> void:
 	character_overlay.visible = true
 	gm_panel.visible = false
 	_choose_character(selected_character)
+	character_start_button.grab_focus()
 	queue_redraw()
 
 
@@ -852,6 +877,9 @@ func _start_game() -> void:
 	pending_levels = 0
 	rerolls_remaining = 1
 	current_upgrade_choices.clear()
+	activated_map_objects.clear()
+	nearby_map_object.clear()
+	interaction_label.visible = false
 	game_time = 0.0
 	spawn_timer = 0.15
 	kills = 0
@@ -1042,7 +1070,7 @@ func _toggle_build_overlay() -> void:
 func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
 	var starter_name := _starter_weapon_name()
-	var starter_display := "%s　已進化" % _starter_evolution_name() if scythe_evolved else "%s　Lv.%d / 5" % [starter_name, scythe_level]
+	var starter_display := "%s　已進化" % _starter_evolution_name() if scythe_evolved else "%s　Lv.%d / %d" % [starter_name, scythe_level, _starter_max_level()]
 	build_text.text = "%s｜%s\n%s\n\n武器 %d / %d\n• %s\n• 星針　　　%s　　• 脈衝雷暴　%s\n• 守望無人機　%s　　• 重力奇點　%s\n• 隕炎彈　　%s\n\n能力 %d / %d\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5　　• 修復奈米機　Lv.%d / 5\n• 精密核心　Lv.%d / 5\n\n%s\n%s\n進化核心　%d（精英異變體掉落）\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
@@ -1075,6 +1103,15 @@ func _update_build_text() -> void:
 
 func _starter_weapon_name() -> String:
 	return String(CHARACTERS[selected_character]["starter_weapon"])
+
+
+func _starter_max_level() -> int:
+	return 8 if selected_character == "epathy" else 5
+
+
+func _starter_passive_required_level() -> int:
+	# 疾風短刃沿用鞭系設計：滿級武器只需持有對應生存被動即可進化。
+	return 1 if selected_character == "epathy" else 3
 
 
 func _starter_weapon_trait_text() -> String:
@@ -1130,19 +1167,21 @@ func _starter_evolution_requirement_text() -> String:
 		return "專屬進化：%s（完成）" % _starter_evolution_name()
 	var data := _starter_evolution_data()
 	var passive_id: String = data["passive_id"]
-	var weapon_state := "完成" if scythe_level >= 5 else "%d / 5" % scythe_level
-	var passive_state := "完成" if int(meta_levels[passive_id]) >= 3 else "%d / 3" % int(meta_levels[passive_id])
+	var max_level := _starter_max_level()
+	var passive_required_level := _starter_passive_required_level()
+	var weapon_state := "完成" if scythe_level >= max_level else "%d / %d" % [scythe_level, max_level]
+	var passive_state := "完成" if int(meta_levels[passive_id]) >= passive_required_level else "%d / %d" % [int(meta_levels[passive_id]), passive_required_level]
 	var core_state := "已有" if evolution_cores_owned > 0 else "尚未取得"
-	return "專屬進化：%s｜%s Lv.5（%s）＋%s Lv.3（%s）＋進化核心（%s）" % [
-		data["name"], _starter_weapon_name(), weapon_state, data["passive_name"], passive_state, core_state,
+	return "專屬進化：%s｜%s Lv.%d（%s）＋%s Lv.%d（%s）＋進化核心（%s）" % [
+		data["name"], _starter_weapon_name(), max_level, weapon_state, data["passive_name"], passive_required_level, passive_state, core_state,
 	]
 
 
 func _can_evolve_starter() -> bool:
-	if scythe_evolved or scythe_level < 5 or evolution_cores_owned <= 0:
+	if scythe_evolved or scythe_level < _starter_max_level() or evolution_cores_owned <= 0:
 		return false
 	var passive_id: String = _starter_evolution_data()["passive_id"]
-	return int(meta_levels[passive_id]) >= 3
+	return int(meta_levels[passive_id]) >= _starter_passive_required_level()
 
 
 func _can_evolve_needle() -> bool:
@@ -1213,6 +1252,99 @@ func _update_player(delta: float) -> void:
 	player_invulnerable = maxf(0.0, player_invulnerable - delta)
 
 
+func _map_object_key(cell_x: int, cell_y: int) -> String:
+	return "%d:%d" % [cell_x, cell_y]
+
+
+func _map_object_position(cell_x: int, cell_y: int) -> Vector2:
+	return Vector2(cell_x * MAP_OBJECT_SECTOR + 220.0, cell_y * MAP_OBJECT_SECTOR + 110.0)
+
+
+func _map_object_kind(cell_x: int, cell_y: int) -> String:
+	var roll := _terrain_noise(cell_x, cell_y, 17.0)
+	if roll < 0.34:
+		return "repair"
+	if roll < 0.67:
+		return "supply"
+	return "pylon"
+
+
+func _map_object_name(kind: String) -> String:
+	match kind:
+		"repair": return "星源修復站"
+		"supply": return "先遣補給箱"
+		_: return "過載脈衝塔"
+
+
+func _nearest_map_object() -> Dictionary:
+	var center_x := int(floorf(player_pos.x / MAP_OBJECT_SECTOR))
+	var center_y := int(floorf(player_pos.y / MAP_OBJECT_SECTOR))
+	var best_distance_squared := INF
+	var best: Dictionary = {}
+	for cell_x in range(center_x - 1, center_x + 2):
+		for cell_y in range(center_y - 1, center_y + 2):
+			var object_position := _map_object_position(cell_x, cell_y)
+			var distance_squared := player_pos.distance_squared_to(object_position)
+			if distance_squared < best_distance_squared:
+				best_distance_squared = distance_squared
+				best = {
+					"key": _map_object_key(cell_x, cell_y),
+					"kind": _map_object_kind(cell_x, cell_y),
+					"pos": object_position,
+					"distance_squared": distance_squared,
+				}
+	return best
+
+
+func _update_map_objects() -> void:
+	nearby_map_object = _nearest_map_object()
+	if nearby_map_object.is_empty() or float(nearby_map_object["distance_squared"]) > MAP_OBJECT_RANGE * MAP_OBJECT_RANGE:
+		interaction_label.visible = false
+		return
+	var key: String = nearby_map_object["key"]
+	var kind: String = nearby_map_object["kind"]
+	interaction_label.visible = true
+	if activated_map_objects.has(key):
+		interaction_label.text = "%s｜本次任務已使用" % _map_object_name(kind)
+		interaction_label.modulate = Color(0.58, 0.62, 0.62)
+		return
+	interaction_label.text = "[E] 啟動 %s" % _map_object_name(kind)
+	interaction_label.modulate = Color.WHITE
+	if Input.is_action_just_pressed("interact"):
+		_activate_map_object(nearby_map_object)
+
+
+func _activate_map_object(map_object: Dictionary) -> void:
+	var key: String = map_object["key"]
+	if activated_map_objects.has(key):
+		return
+	var kind: String = map_object["kind"]
+	var position: Vector2 = map_object["pos"]
+	activated_map_objects[key] = true
+	match kind:
+		"repair":
+			player_health = minf(player_max_health, player_health + 28.0)
+			player_shield = minf(player_max_shield, player_shield + 12.0)
+			effects.append({"kind": "map_repair", "pos": position, "life": 1.0, "total": 1.0, "radius": 118.0})
+			_show_game_notice("星源修復站｜生命 +28、護盾 +12")
+		"supply":
+			rerolls_remaining += 1
+			effects.append({"kind": "map_supply", "pos": position, "life": 1.0, "total": 1.0, "radius": 112.0})
+			_gain_experience(16.0 + level * 1.5)
+			_show_game_notice("先遣補給箱｜獲得星源經驗、重骰 +1")
+		_:
+			var blast_damage := 105.0 + game_time * 0.22
+			var blast_radius := 285.0
+			for enemy_index in range(enemies.size() - 1, -1, -1):
+				var hit_radius := blast_radius + float(enemies[enemy_index]["radius"])
+				if position.distance_squared_to(enemies[enemy_index]["pos"]) <= hit_radius * hit_radius:
+					_damage_enemy(enemy_index, blast_damage, "skill")
+			effects.append({"kind": "map_pylon", "pos": position, "life": 0.9, "total": 0.9, "radius": blast_radius})
+			_show_game_notice("過載脈衝塔｜清掃周圍異變體")
+	interaction_label.text = "%s｜本次任務已使用" % _map_object_name(kind)
+	interaction_label.modulate = Color(0.58, 0.62, 0.62)
+
+
 func _update_passive_recovery(delta: float) -> void:
 	if recovery_per_second <= 0.0 or player_health >= player_max_health:
 		return
@@ -1224,22 +1356,48 @@ func _use_epathy_skill() -> void:
 	var slash_direction := _nearest_enemy_direction()
 	var slash_angle := slash_direction.angle()
 	var half_arc := 1.25
+	var slash_angles: Array[float] = [slash_angle]
+	if scythe_level >= 2 or scythe_evolved:
+		slash_angles.append(slash_angle + PI)
+	var recovery_hits := 0
 	for index in range(enemies.size() - 1, -1, -1):
 		var enemy = enemies[index]
 		var hit_radius: float = radius + float(enemy["radius"])
 		if player_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
 			continue
 		var enemy_direction: Vector2 = player_pos.direction_to(enemy["pos"])
-		var angle_difference := absf(wrapf(enemy_direction.angle() - slash_angle, -PI, PI))
-		if angle_difference > half_arc and (not scythe_evolved or absf(angle_difference - PI) > half_arc):
+		var matched_slash := -1
+		for slash_index in slash_angles.size():
+			var angle_difference := absf(wrapf(enemy_direction.angle() - slash_angles[slash_index], -PI, PI))
+			if angle_difference <= half_arc:
+				matched_slash = slash_index
+				break
+		if matched_slash < 0:
 			continue
 		var push_direction: Vector2 = player_pos.direction_to(enemy["pos"])
 		enemy["pos"] += push_direction * (12.0 if enemy["boss"] else 34.0 + scythe_level * 5.0)
 		enemies[index] = enemy
-		_damage_enemy(index, scythe_damage * damage_multiplier * close_damage_multiplier, "starter")
-	effects.append({"kind": "slash", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius, "angle": slash_angle, "color": _starter_ring_color()})
-	if scythe_evolved:
-		effects.append({"kind": "slash", "pos": player_pos, "life": 0.42, "total": 0.42, "radius": radius, "angle": slash_angle + PI, "color": _starter_ring_color()})
+		var secondary_multiplier := 1.0 if scythe_evolved else 0.72
+		var slash_damage := scythe_damage * damage_multiplier * close_damage_multiplier * (1.0 if matched_slash == 0 else secondary_multiplier)
+		var critical := scythe_evolved and rng.randf() < 0.2
+		if critical:
+			slash_damage *= 2.0
+			effects.append({"kind": "epathy_critical", "pos": enemy["pos"], "life": 0.34, "total": 0.34, "radius": 34.0, "color": _starter_ring_color()})
+		_damage_enemy(index, slash_damage, "starter")
+		if scythe_evolved:
+			recovery_hits += 1
+	for effect_index in slash_angles.size():
+		effects.append({
+			"kind": "slash",
+			"pos": player_pos,
+			"life": 0.42 if effect_index > 0 else 0.38,
+			"total": 0.42 if effect_index > 0 else 0.38,
+			"radius": radius,
+			"angle": slash_angles[effect_index],
+			"color": _starter_ring_color(),
+		})
+	if scythe_evolved and recovery_hits > 0:
+		player_health = minf(player_max_health, player_health + minf(4.0, recovery_hits * 0.35))
 
 
 func _use_lucia_skill() -> void:
@@ -2240,7 +2398,7 @@ func _reroll_upgrades() -> void:
 
 func _available_upgrades() -> Array:
 	var result: Array = []
-	if scythe_level < 5:
+	if scythe_level < _starter_max_level():
 		result.append({
 			"id": "scythe",
 			"name": "%s Lv.%d" % [_starter_weapon_name(), scythe_level + 1],
@@ -2286,6 +2444,15 @@ func _available_upgrades() -> Array:
 
 
 func _scythe_upgrade_description(next_level: int) -> String:
+	if selected_character == "epathy":
+		match next_level:
+			2: return "追加反向第二斬，擴大近身清場覆蓋"
+			3: return "基礎傷害 +5"
+			4: return "基礎傷害 +5，斬擊範圍 +10%"
+			5: return "基礎傷害 +5"
+			6: return "基礎傷害 +5，斬擊範圍 +10%"
+			7: return "基礎傷害 +5"
+			8: return "基礎傷害 +5；可進行專屬進化"
 	if selected_character == "lucia":
 		match next_level:
 			2: return "火球傷害 +10"
@@ -2360,14 +2527,21 @@ func _select_upgrade(upgrade_id: String) -> void:
 	match upgrade_id:
 		"scythe":
 			scythe_level += 1
-			match scythe_level:
-				2: scythe_damage += 10.0
-				3: scythe_radius += 34.0
-				4: scythe_interval *= 0.8
-				5:
-					scythe_damage += 14.0
-					if selected_character == "claire":
-						player_max_shield += 8.0
+			if selected_character == "epathy":
+				match scythe_level:
+					3, 5, 7, 8: scythe_damage += 5.0
+					4, 6:
+						scythe_damage += 5.0
+						scythe_radius *= 1.1
+			else:
+				match scythe_level:
+					2: scythe_damage += 10.0
+					3: scythe_radius += 34.0
+					4: scythe_interval *= 0.8
+					5:
+						scythe_damage += 14.0
+						if selected_character == "claire":
+							player_max_shield += 8.0
 		"needle":
 			needle_level += 1
 			match needle_level:
@@ -2532,7 +2706,7 @@ func _update_interface(delta: float) -> void:
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
 	weapon_label.text = "%s\n星針 %s｜雷暴 %s\n無人機 %s｜奇點 %s｜隕炎 %s" % [
-		("%s｜進化" % _starter_evolution_name() if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜待核心" if scythe_level >= 5 else "")]),
+		("%s｜進化" % _starter_evolution_name() if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜待核心" if scythe_level >= _starter_max_level() else "")]),
 		("未取得" if needle_level == 0 else ("追星蜂群｜進化" if needle_evolved else "Lv.%d" % needle_level)),
 		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
 		("未取得" if drone_level == 0 else "Lv.%d" % drone_level),
@@ -2565,6 +2739,7 @@ func _finish_game(victory: bool) -> void:
 		return
 	game_over = true
 	_stop_battle_music()
+	interaction_label.visible = false
 	_set_gm_speed(false)
 	gm_panel.visible = false
 	get_tree().paused = true
@@ -2711,17 +2886,41 @@ func _draw_background() -> void:
 					crystal + Vector2(0.0, 15.0), crystal + Vector2(-8.0, 6.0),
 				]), Color(0.3, 0.94, 0.68, 0.58))
 
-	# 規律出現的星源觀測平台，暫時作為未來地圖事件的視覺錨點。
-	var sector := 640.0
-	var sector_x := floorf(player_pos.x / sector) * sector
-	var sector_y := floorf(player_pos.y / sector) * sector
+	# 每個地圖區塊各有一座可互動設施；狀態以區塊座標記錄，不生成額外節點。
+	var sector_x := int(floorf(player_pos.x / MAP_OBJECT_SECTOR))
+	var sector_y := int(floorf(player_pos.y / MAP_OBJECT_SECTOR))
 	for offset_x in range(-2, 3):
 		for offset_y in range(-2, 3):
-			var marker := Vector2(sector_x + offset_x * sector + 220.0, sector_y + offset_y * sector + 110.0)
+			var cell_x := sector_x + offset_x
+			var cell_y := sector_y + offset_y
+			var marker := _map_object_position(cell_x, cell_y)
+			var object_kind := _map_object_kind(cell_x, cell_y)
+			var object_used := activated_map_objects.has(_map_object_key(cell_x, cell_y))
+			var object_color := Color(0.28, 1.0, 0.68)
+			match object_kind:
+				"supply": object_color = Color(1.0, 0.72, 0.22)
+				"pylon": object_color = Color(1.0, 0.3, 0.5)
+			if object_used:
+				object_color = Color(0.34, 0.39, 0.38)
 			draw_ellipse_shadow(marker + Vector2(0.0, 12.0), 70.0, 25.0, Color(0.01, 0.04, 0.04, 0.42))
 			draw_circle(marker, 48.0, Color(0.05, 0.12, 0.12, 0.7))
-			draw_arc(marker, 48.0, 0.0, TAU, 32, Color(0.22, 0.82, 0.66, 0.34), 3.0)
-			draw_arc(marker, 31.0, game_time * 0.2, game_time * 0.2 + 4.8, 28, Color(0.48, 1.0, 0.78, 0.26), 3.0)
+			draw_arc(marker, 48.0, 0.0, TAU, 32, Color(object_color, 0.44), 3.0)
+			draw_arc(marker, 34.0, game_time * 0.35, game_time * 0.35 + 4.8, 28, Color(object_color, 0.78), 4.0)
+			match object_kind:
+				"repair":
+					draw_rect(Rect2(marker + Vector2(-5.0, -21.0), Vector2(10.0, 42.0)), object_color)
+					draw_rect(Rect2(marker + Vector2(-21.0, -5.0), Vector2(42.0, 10.0)), object_color)
+				"supply":
+					draw_colored_polygon(PackedVector2Array([
+						marker + Vector2(0.0, -23.0), marker + Vector2(24.0, 0.0),
+						marker + Vector2(0.0, 23.0), marker + Vector2(-24.0, 0.0),
+					]), Color(object_color, 0.88))
+					draw_line(marker + Vector2(-13.0, 0.0), marker + Vector2(13.0, 0.0), Color(0.12, 0.15, 0.11), 5.0)
+				_:
+					draw_circle(marker, 15.0, Color(object_color, 0.9))
+					for spoke_index in 6:
+						var spoke_direction := Vector2.from_angle(TAU * float(spoke_index) / 6.0 + game_time * 0.22)
+						draw_line(marker + spoke_direction * 18.0, marker + spoke_direction * 31.0, object_color, 5.0, true)
 
 
 func _terrain_noise(x: int, y: int, salt: float) -> float:
@@ -2898,6 +3097,11 @@ func _draw_effect(effect: Dictionary) -> void:
 			var slash_color: Color = effect.get("color", Color(1.0, 0.55, 0.65))
 			var slash_angle: float = float(effect.get("angle", 0.0))
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.55 + 0.45 * progress), slash_angle - 1.25, slash_angle + 1.25, 40, Color(slash_color, alpha), 12.0, true)
+		"epathy_critical":
+			var critical_color: Color = effect.get("color", Color(1.0, 0.42, 0.55))
+			var critical_radius := float(effect["radius"]) * (0.4 + progress * 0.75)
+			draw_arc(effect["pos"], critical_radius, -0.8, 2.3, 22, Color(1.0, 0.88, 0.42, alpha), 7.0, true)
+			draw_arc(effect["pos"], critical_radius * 0.72, 2.4, 5.5, 20, Color(critical_color, alpha), 5.0, true)
 		"fire":
 			var fire_color: Color = effect.get("color", Color(1.0, 0.5, 0.14))
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(fire_color, alpha * 0.16))
@@ -2909,6 +3113,20 @@ func _draw_effect(effect: Dictionary) -> void:
 			var ice_color: Color = effect.get("color", Color(0.55, 0.85, 1.0))
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(ice_color, alpha * 0.14))
 			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 64, Color(ice_color.lightened(0.25), alpha), 8.0, true)
+		"map_repair":
+			var repair_radius := float(effect["radius"]) * (0.28 + progress * 0.72)
+			draw_circle(effect["pos"], repair_radius, Color(0.24, 1.0, 0.68, alpha * 0.12))
+			draw_arc(effect["pos"], repair_radius, 0.0, TAU, 48, Color(0.52, 1.0, 0.78, alpha), 8.0, true)
+		"map_supply":
+			var supply_radius := float(effect["radius"]) * (0.28 + progress * 0.72)
+			draw_arc(effect["pos"], supply_radius, -progress * TAU, (1.0 - progress) * TAU, 48, Color(1.0, 0.76, 0.24, alpha), 8.0, true)
+			for shard_index in 6:
+				var shard_direction := Vector2.from_angle(TAU * float(shard_index) / 6.0)
+				draw_circle(effect["pos"] + shard_direction * supply_radius * 0.7, 6.0 * alpha, Color(1.0, 0.92, 0.48, alpha))
+		"map_pylon":
+			var pylon_radius := float(effect["radius"]) * progress
+			draw_circle(effect["pos"], pylon_radius, Color(1.0, 0.18, 0.48, alpha * 0.1))
+			draw_arc(effect["pos"], pylon_radius, 0.0, TAU, 72, Color(1.0, 0.36, 0.62, alpha), 12.0, true)
 		"repair":
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(0.2, 1.0, 0.62, alpha * 0.18))
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.45 + progress * 0.55), 0.0, TAU, 40, Color(0.48, 1.0, 0.76, alpha), 6.0, true)
@@ -2978,6 +3196,8 @@ func _draw_player() -> void:
 			"epathy":
 				var slash_angle := _nearest_enemy_direction().angle()
 				draw_arc(player_pos, scythe_radius, slash_angle - 1.25, slash_angle + 1.25, 40, preview_color, 3.0)
+				if scythe_level >= 2 or scythe_evolved:
+					draw_arc(player_pos, scythe_radius, slash_angle + PI - 1.25, slash_angle + PI + 1.25, 40, preview_color, 3.0)
 			"lucia": draw_circle(player_pos, 22.0, preview_color)
 			"claire": draw_arc(player_pos, scythe_radius, 0.0, TAU, 48, preview_color, 3.0)
 			"rafari": draw_circle(player_pos, 18.0, preview_color)

@@ -17,8 +17,8 @@ func _run() -> void:
 	if game.battle_music_player == null or game.battle_music_player.stream == null or game.battle_music_player.playing:
 		_fail("戰鬥音樂沒有正確初始化，或在角色選擇頁提前播放")
 		return
-	if not InputMap.action_has_event("build", _key_event(KEY_B)) or not InputMap.action_has_event("pause", _key_event(KEY_P)):
-		_fail("瀏覽器替代鍵 B／P 沒有註冊")
+	if not InputMap.action_has_event("build", _key_event(KEY_B)) or not InputMap.action_has_event("pause", _key_event(KEY_P)) or not InputMap.action_has_event("interact", _key_event(KEY_E)):
+		_fail("瀏覽器替代鍵 B／P 或互動鍵 E 沒有註冊")
 		return
 	if not game.character_overlay.visible or game.run_started:
 		_fail("角色選擇畫面沒有在啟動時顯示")
@@ -137,6 +137,41 @@ func _run() -> void:
 	if absf(upward_slash_angle + PI * 0.5) > 0.1 or absf(upward_slash_angle - right_slash_angle) < 1.0:
 		_fail("埃帕蒂的疾風短刃沒有朝最近敵人自動轉向")
 		return
+	game._start_game()
+	game.enemies.clear()
+	game.effects.clear()
+	game._select_upgrade("scythe")
+	game._spawn_mutant("chaser")
+	game.enemies[-1]["pos"] = game.player_pos + Vector2(70.0, 0.0)
+	game.enemies[-1]["hp"] = 500.0
+	game.enemies[-1]["max_hp"] = 500.0
+	game._spawn_mutant("chaser")
+	game.enemies[-1]["pos"] = game.player_pos + Vector2(-70.0, 0.0)
+	game.enemies[-1]["hp"] = 500.0
+	game.enemies[-1]["max_hp"] = 500.0
+	game._fire_scythe_ring()
+	if game.scythe_level != 2 or game.effects.size() != 2 or float(game.enemies[0]["hp"]) >= 500.0 or float(game.enemies[1]["hp"]) >= 500.0:
+		_fail("埃帕蒂 Lv.2 沒有追加反向第二斬")
+		return
+	for upgrade_level in range(3, 9):
+		game._select_upgrade("scythe")
+	if game.scythe_level != 8 or not is_equal_approx(game.scythe_damage, 54.0) or game.scythe_radius < 159.0 or game._starter_max_level() != 8:
+		_fail("埃帕蒂的八級成長曲線沒有套用 +30 傷害與 +20% 範圍")
+		return
+
+	game._start_game()
+	game.player_pos = game._map_object_position(0, 0)
+	game.camera.position = game.player_pos
+	game._update_map_objects()
+	if not game.interaction_label.visible or game.nearby_map_object.is_empty() or not "[E]" in game.interaction_label.text:
+		_fail("靠近地圖互動物件時沒有顯示 E 鍵提示")
+		return
+	var map_object_key: String = game.nearby_map_object["key"]
+	game._activate_map_object(game.nearby_map_object)
+	if not game.activated_map_objects.has(map_object_key) or not "已使用" in game.interaction_label.text:
+		_fail("地圖互動物件沒有被正確啟動或記錄單局狀態")
+		return
+	game._start_game()
 	game.enemies.clear()
 	game._toggle_build_overlay()
 	if not game.build_open or not game.build_overlay.visible or not "疾風短刃" in game.build_text.text:
@@ -405,7 +440,7 @@ func _run() -> void:
 		_fail("結算畫面沒有顯示分來源傷害")
 		return
 
-	print("SMOKE_TEST_PASS: evolution-core/four-starter-evolutions/gm-controls/lucia-shotgun/fixed-area-coil/render-culling/projectile-limits/rafari-name/auto-aim-slash/targeted-frost/automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
+	print("SMOKE_TEST_PASS: map-interactions/epathy-eight-level-curve/evolution-core/four-starter-evolutions/gm-controls/lucia-shotgun/fixed-area-coil/render-culling/projectile-limits/rafari-name/auto-aim-slash/targeted-frost/automatic-character-skills/character-colors/apostle-burst-telegraph/needle-evolution/balanced-upgrade-draft/cooldown-area-passives/wave-countdown/guaranteed-wave-elites/browser-key-aliases/shooter-telegraph/dash-telegraph/damage-breakdown/character-selection/starter-visuals/pause-menu/build/repair-core/enemy-types/waves/status/movement/combat/stats/xp/reroll/storm/apostle/result")
 	get_tree().quit(0)
 
 

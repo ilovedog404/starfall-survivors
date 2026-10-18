@@ -51,6 +51,8 @@ jobs:
           grep -q "ROSTER_TEST_PASS" /tmp/roster.log
           "$GODOT" --headless --path . --scene res://tests/performance_test.tscn --quit-after 240 2>&1 | tee /tmp/performance.log
           grep -q "PERFORMANCE_TEST_PASS" /tmp/performance.log
+          "$GODOT" --headless --path . --scene res://tests/map_objects_test.tscn --quit-after 240 2>&1 | tee /tmp/map_objects.log
+          grep -q "MAP_OBJECTS_TEST_PASS" /tmp/map_objects.log
           "$GODOT" --headless --path . --export-release Web "$PWD/public/index.html"
           cp "$NOTES" public/版本說明.txt
           (cd public && zip -q -r "../dist/星隕倖存者-${GITHUB_REF_NAME}-Web.zip" .)
