@@ -4,4 +4,11 @@ releases/*/web/
 releases/**/*.zip
 *.tmp
 *.log
+tools/apk-analysis/downloads/
+tools/apk-analysis/runtime/
+tools/apk-analysis/state/
+tools/apk-analysis/input/*
+!tools/apk-analysis/input/.gitkeep
+tools/apk-analysis/work/*
+!tools/apk-analysis/work/.gitkeep
 

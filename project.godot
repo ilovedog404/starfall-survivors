@@ -1,5 +1,11 @@
 ; Engine configuration file.
-; 星隕倖存者 Web prototype
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
 config_version=5
 
 [application]
@@ -8,6 +14,7 @@ config/name="星隕倖存者"
 config/description="《星隕計畫 Ark Re:Code》非官方生存 Roguelite 同人原型"
 config/version="Beta0.13.1"
 run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7")
 
 [display]
 
@@ -22,10 +29,4 @@ window/handheld/orientation=1
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-textures/default_filters/use_nearest_mipmap_filter=false
 environment/defaults/default_clear_color=Color(0.018, 0.025, 0.055, 1)
-
-[audio]
-
-driver/enable_input=false
-
