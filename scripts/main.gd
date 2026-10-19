@@ -34,7 +34,7 @@ const LOW_DETAIL_ENEMY_COUNT := 220
 const DRAW_MARGIN := 180.0
 const MAP_OBJECT_RANGE := 76.0
 const MAP_CHEST_COUNT := 4
-const MAP_CHEST_DISTANCE := 820.0
+const MAP_CHEST_DISTANCE := 2460.0
 const MAP_CHEST_ANGLE_SHIFT := 0.647517
 const WAVE_TIMES := [60.0, 120.0, 180.0]
 const VERSION := "2.5D 改版開發版"
@@ -1316,7 +1316,7 @@ func _spawn_map_object_ring(angle_offset: float) -> void:
 	map_object_angle_offset = wrapf(angle_offset, -PI, PI)
 	for chest_index in MAP_CHEST_COUNT:
 		var angle := map_object_angle_offset + TAU * float(chest_index) / float(MAP_CHEST_COUNT)
-		var distance := MAP_CHEST_DISTANCE + rng.randf_range(-65.0, 85.0)
+		var distance := MAP_CHEST_DISTANCE + rng.randf_range(-195.0, 255.0)
 		active_map_objects.append({
 			"key": "%d:%d" % [map_object_cycle, chest_index],
 			"kind": "supply",
