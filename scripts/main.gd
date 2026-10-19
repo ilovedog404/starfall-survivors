@@ -38,6 +38,13 @@ const MAP_CHEST_DISTANCE := 2460.0
 const MAP_CHEST_ANGLE_SHIFT := 0.647517
 const WAVE_TIMES := [60.0, 120.0, 180.0]
 const VERSION := "2.5D 改版開發版"
+const SPAWN_MARGIN := 140.0
+const RANDOM_ELITE_COOLDOWN := 22.0
+const APOSTLE_ENRAGE_TEMPO := 1.4
+const SEPARATION_CELL := 48.0
+const SEPARATION_MAX_CHECKS := 10
+const GAMEPLAY_EFFECT_KINDS := ["arsenal_pool", "contamination", "apostle_hazard", "elite_explosion"]
+const GROUND_EFFECT_KINDS := ["arsenal_pool", "contamination", "apostle_hazard", "ice", "warning", "elite_explosion"]
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -208,6 +215,11 @@ var meteor_timer := 1.35
 
 var arsenal_levels: Dictionary = {}
 var arsenal_timers: Dictionary = {}
+var next_enemy_id := 0
+var elite_spawn_cooldown := 0.0
+var apostle_enraged := false
+var arsenal_cooldown_scale := 1.0
+var arsenal_area_scale := 1.0
 
 var enemies: Array = []
 var projectiles: Array = []
@@ -323,6 +335,7 @@ func _process(delta: float) -> void:
 	_update_projectiles(delta)
 	_update_enemy_statuses(delta)
 	_update_enemies(delta)
+	_apply_enemy_separation(delta)
 	_update_hostile_projectiles(delta)
 	_update_gems(delta)
 	_update_repair_cores(delta)
@@ -422,9 +435,10 @@ func _build_interface() -> void:
 	weapon_label.anchor_top = 1.0
 	weapon_label.anchor_bottom = 1.0
 	weapon_label.offset_left = 20.0
-	weapon_label.offset_top = -122.0
+	weapon_label.offset_top = -160.0
 	weapon_label.offset_right = 520.0
 	weapon_label.offset_bottom = -18.0
+	weapon_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	weapon_label.add_theme_font_size_override("font_size", 17)
 	hud.add_child(weapon_label)
 
@@ -920,6 +934,12 @@ func _start_game() -> void:
 	instruction_time = 10.0
 	wave_index = 0
 	hud_refresh_timer = 0.0
+	next_enemy_id = 0
+	elite_spawn_cooldown = 0.0
+	apostle_enraged = false
+	arsenal_cooldown_scale = 1.0
+	arsenal_area_scale = 1.0
+	instruction_label.text = "WASD／方向鍵移動　E 互動　B／Tab 建構　Esc／P 暫停"
 	_start_battle_music()
 
 	player_pos = Vector2.ZERO
@@ -1011,6 +1031,7 @@ func _start_game() -> void:
 	_spawn_map_object_ring(map_object_angle_offset)
 
 	camera.position = player_pos
+	camera.reset_smoothing()
 	character_overlay.visible = false
 	build_overlay.visible = false
 	upgrade_overlay.visible = false
@@ -1043,7 +1064,7 @@ func _toggle_gm_speed() -> void:
 
 
 func _gm_level_up() -> void:
-	if not run_started or game_over or manual_paused or build_open:
+	if not run_started or game_over or manual_paused or build_open or choosing_elite_reward:
 		return
 	_gain_experience(maxf(0.0, experience_required - experience))
 	_show_game_notice("GM：獲得 1 次升級")
@@ -1243,7 +1264,7 @@ func _needle_evolution_requirement_text() -> String:
 	var weapon_state := "完成" if needle_level >= 8 else "%d / 8" % needle_level
 	var passive_state := "完成" if int(meta_levels["cooldown"]) >= 3 else "%d / 3" % int(meta_levels["cooldown"])
 	var core_state := "已有" if evolution_cores_owned > 0 else "尚未取得"
-	return "共通進化：追星蜂群｜星針 Lv.5（%s）＋冷卻模組 Lv.3（%s）＋進化核心（%s）" % [weapon_state, passive_state, core_state]
+	return "共通進化：追星蜂群｜星針 Lv.8（%s）＋冷卻模組 Lv.3（%s）＋進化核心（%s）" % [weapon_state, passive_state, core_state]
 
 
 func _try_consume_evolution_core() -> bool:
@@ -1491,29 +1512,64 @@ func _use_rafari_skill() -> void:
 		if not inside_frost:
 			continue
 		var base_slow_time := (2.4 if enemy["boss"] else 1.7) if scythe_evolved else ((1.8 if enemy["boss"] else 1.1) + scythe_level * 0.12)
-		enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), base_slow_time * slow_effect_multiplier)
-		enemy["slow_factor"] = 0.38 if enemy["boss"] and scythe_evolved else (0.52 if enemy["boss"] else (0.0 if scythe_evolved else 0.28))
-		enemies[index] = enemy
+		var frost_factor := 0.38 if enemy["boss"] and scythe_evolved else (0.52 if enemy["boss"] else (0.0 if scythe_evolved else 0.28))
+		_apply_slow(enemy, base_slow_time * slow_effect_multiplier, frost_factor)
 		_damage_enemy(index, scythe_damage * (0.88 if scythe_evolved else 0.72) * damage_multiplier, "starter")
 	for target_pos in target_positions:
 		effects.append({"kind": "ice", "pos": target_pos, "life": 0.92 if scythe_evolved else 0.72, "total": 0.92 if scythe_evolved else 0.72, "radius": radius, "color": _starter_ring_color()})
 
 
+func _apply_slow(enemy: Dictionary, duration: float, factor: float) -> void:
+	var remaining := float(enemy.get("slow_time", 0.0))
+	var current_factor := float(enemy.get("slow_factor", 1.0))
+	if remaining <= 0.0 or factor <= current_factor:
+		enemy["slow_factor"] = factor
+		enemy["slow_time"] = maxf(remaining, duration)
+	elif remaining < duration:
+		enemy["slow_factor"] = factor
+		enemy["slow_time"] = duration
+
+
+func _take_enemy_id() -> int:
+	next_enemy_id += 1
+	return next_enemy_id
+
+
+func _offscreen_spawn_position() -> Vector2:
+	var half := VIEW_SIZE * 0.5 + Vector2(SPAWN_MARGIN, SPAWN_MARGIN)
+	var offset := Vector2.ZERO
+	if rng.randf() < half.x / (half.x + half.y):
+		offset = Vector2(rng.randf_range(-half.x, half.x), half.y * (1.0 if rng.randf() < 0.5 else -1.0))
+	else:
+		offset = Vector2(half.x * (1.0 if rng.randf() < 0.5 else -1.0), rng.randf_range(-half.y, half.y))
+	return player_pos + offset
+
+
 func _update_spawning(delta: float) -> void:
 	game_time += delta
+	elite_spawn_cooldown = maxf(0.0, elite_spawn_cooldown - delta)
 	while wave_index < WAVE_TIMES.size() and game_time >= float(WAVE_TIMES[wave_index]):
 		_trigger_wave(wave_index)
 		wave_index += 1
+
 	spawn_timer -= delta
-	var interval := maxf(0.16, 0.72 - game_time * 0.0016)
-	if spawn_timer <= 0.0 and enemies.size() < MAX_ENEMIES:
-		var batch := 1 + int(game_time / 95.0)
-		for index in batch:
-			_spawn_mutant()
-		spawn_timer += interval
+	if spawn_timer <= 0.0:
+		var interval := maxf(0.16, 0.72 - game_time * 0.0016)
+		if enemies.size() < MAX_ENEMIES:
+			var batch := 1 + int(game_time / 95.0)
+			for index in batch:
+				if _spawn_mutant().is_empty():
+					break
+			spawn_timer += interval
+		else:
+			spawn_timer = interval
 
 	if game_time >= APOSTLE_TIME and not apostle_spawned:
 		_spawn_apostle()
+
+	if game_time >= RUN_DURATION and apostle_present and not apostle_enraged:
+		apostle_enraged = true
+		_show_game_notice("時限已到：使徒進入狂暴狀態！")
 
 
 func _trigger_wave(index: int) -> void:
@@ -1532,9 +1588,9 @@ func _trigger_wave(index: int) -> void:
 	effects.append({"kind": "warning", "pos": player_pos, "life": 1.1, "total": 1.1, "radius": 300.0})
 
 
-func _spawn_mutant(force_kind: String = "", force_elite: bool = false, force_affix: String = "") -> void:
-	var angle := rng.randf_range(0.0, TAU)
-	var distance := rng.randf_range(650.0, 830.0)
+func _spawn_mutant(force_kind: String = "", force_elite: bool = false, force_affix: String = "", allow_random_elite: bool = true) -> Dictionary:
+	if enemies.size() >= MAX_ENEMIES:
+		return {}
 	var kind := force_kind
 	if kind.is_empty():
 		var roll := rng.randf()
@@ -1553,10 +1609,14 @@ func _spawn_mutant(force_kind: String = "", force_elite: bool = false, force_aff
 		else:
 			kind = "chaser"
 	var difficulty := 1.0 + game_time / 360.0
-	var elite := force_elite or (game_time > 50.0 and rng.randf() < 0.025)
+	var elite := force_elite
+	if not elite and allow_random_elite and game_time > 50.0 and elite_spawn_cooldown <= 0.0 and rng.randf() < 0.025:
+		elite = true
+		elite_spawn_cooldown = RANDOM_ELITE_COOLDOWN
 	var elite_affix := ""
 	if elite:
-		elite_affix = force_affix if force_affix in ["swift", "shielded", "explosive"] else ["swift", "shielded", "explosive"][rng.randi_range(0, 2)]
+		var affixes := ["swift", "shielded", "explosive"]
+		elite_affix = force_affix if force_affix in affixes else String(affixes[rng.randi_range(0, 2)])
 	var base_hp := 31.0
 	var base_speed := 76.0
 	var radius := 15.0
@@ -1594,8 +1654,9 @@ func _spawn_mutant(force_kind: String = "", force_elite: bool = false, force_aff
 		if elite_affix == "swift":
 			speed *= 1.35
 	var elite_shield := hp * 0.34 if elite_affix == "shielded" else 0.0
-	enemies.append({
-		"pos": player_pos + Vector2.from_angle(angle) * distance,
+	var enemy := {
+		"id": _take_enemy_id(),
+		"pos": _offscreen_spawn_position(),
 		"hp": hp,
 		"max_hp": hp,
 		"speed": speed,
@@ -1623,7 +1684,9 @@ func _spawn_mutant(force_kind: String = "", force_elite: bool = false, force_aff
 		"guarded_time": 0.0,
 		"support_cooldown": rng.randf_range(0.2, 0.8),
 		"contamination_cooldown": rng.randf_range(0.8, 2.2),
-	})
+	}
+	enemies.append(enemy)
+	return enemy
 
 
 func _spawn_apostle() -> void:
@@ -1633,6 +1696,7 @@ func _spawn_apostle() -> void:
 	apostle_hp = apostle_max_hp
 	apostle_phase = 1
 	enemies.append({
+		"id": _take_enemy_id(),
 		"pos": player_pos + Vector2(0.0, -650.0),
 		"hp": apostle_max_hp,
 		"max_hp": apostle_max_hp,
@@ -1726,7 +1790,7 @@ func _update_weapons(delta: float) -> void:
 			_fire_arsenal_weapon(weapon_id, weapon_level)
 			var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
 			var cooldown_scale := pow(0.85, float(int(weapon_level >= 4) + int(weapon_level >= 7)))
-			arsenal_timers[weapon_id] = float(blueprint["interval"]) * cooldown_scale * pow(0.94, float(meta_levels["cooldown"]))
+			arsenal_timers[weapon_id] = float(blueprint["interval"]) * cooldown_scale * arsenal_cooldown_scale
 
 
 func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
@@ -1736,6 +1800,7 @@ func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
 	var damage := float(blueprint["damage"]) * damage_scale * damage_multiplier
 	var area_scale := 1.0 + (0.22 if weapon_level >= 3 else 0.0) + (0.25 if weapon_level >= 6 else 0.0)
 	var radius := float(blueprint["radius"]) * area_scale
+	var field_radius := radius * arsenal_area_scale
 	var amount := int(blueprint["amount"]) + int(weapon_level >= 3) + int(weapon_level >= 6)
 	match pattern:
 		"aimed_pierce":
@@ -1755,28 +1820,31 @@ func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
 				_spawn_arsenal_projectile(player_pos, aim.rotated(spread), float(blueprint["speed"]), damage, radius, 2.15, weapon_id, 4 + int(weapon_level >= 5) * 2, true)
 		"orbit":
 			for enemy_index in range(enemies.size() - 1, -1, -1):
+				if enemy_index >= enemies.size():
+					continue
+				var enemy_radius := float(enemies[enemy_index]["radius"])
 				var distance := player_pos.distance_to(enemies[enemy_index]["pos"])
-				if distance >= radius * 0.55 and distance <= radius + float(enemies[enemy_index]["radius"]):
-					_damage_enemy(enemy_index, damage, "other")
-			effects.append({"kind": "arsenal_orbit", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": radius, "amount": amount})
+				if distance >= field_radius * 0.55 - enemy_radius and distance <= field_radius + enemy_radius:
+					_damage_enemy(enemy_index, damage, weapon_id)
+			effects.append({"kind": "arsenal_orbit", "pos": player_pos, "life": 0.38, "total": 0.38, "radius": field_radius, "amount": amount})
 		"aura":
 			for enemy_index in range(enemies.size() - 1, -1, -1):
-				var hit_radius := radius + float(enemies[enemy_index]["radius"])
-				if player_pos.distance_squared_to(enemies[enemy_index]["pos"]) <= hit_radius * hit_radius:
-					if weapon_level >= 6:
-						var enemy = enemies[enemy_index]
-						enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), 0.55)
-						enemy["slow_factor"] = 0.82 if enemy["boss"] else 0.68
-						enemies[enemy_index] = enemy
-					_damage_enemy(enemy_index, damage, "other")
-			effects.append({"kind": "arsenal_aura", "pos": player_pos, "life": 0.42, "total": 0.42, "radius": radius})
+				if enemy_index >= enemies.size():
+					continue
+				var enemy: Dictionary = enemies[enemy_index]
+				var hit_radius := field_radius + float(enemy["radius"])
+				if player_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
+					continue
+				if weapon_level >= 6:
+					_apply_slow(enemy, 0.55, 0.82 if enemy["boss"] else 0.68)
+				_damage_enemy(enemy_index, damage, weapon_id)
+			effects.append({"kind": "arsenal_aura", "pos": player_pos, "life": 0.42, "total": 0.42, "radius": field_radius})
 		"target_area":
-			var targets := _nearest_enemy_indices(amount)
-			for target_index in targets:
+			for target_index in _nearest_enemy_indices(amount):
 				if target_index < 0 or target_index >= enemies.size():
 					continue
-				var target_pos: Vector2 = enemies[target_index]["pos"]
-				effects.append({"kind": "arsenal_pool", "pos": target_pos, "life": 2.2 + weapon_level * 0.12, "total": 2.2 + weapon_level * 0.12, "radius": radius, "damage": damage, "damage_tick": 0.0, "slow_factor": 0.42 if weapon_level >= 5 else 0.56})
+				var pool_life := 2.2 + weapon_level * 0.12
+				effects.append({"kind": "arsenal_pool", "pos": enemies[target_index]["pos"], "life": pool_life, "total": pool_life, "radius": field_radius, "damage": damage, "damage_tick": 0.0, "slow_factor": 0.42 if weapon_level >= 5 else 0.56, "source": weapon_id})
 		"chain":
 			var target_indices := _nearest_enemy_indices(amount + 1)
 			var chain_points: Array[Vector2] = [player_pos]
@@ -1789,7 +1857,7 @@ func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
 			for target_index in target_indices:
 				if target_index < 0 or target_index >= enemies.size():
 					continue
-				_damage_enemy(target_index, damage * pow(0.9, chain_step), "other")
+				_damage_enemy(target_index, damage * pow(0.9, chain_step), weapon_id)
 				chain_step += 1
 			effects.append({"kind": "arsenal_chain", "pos": player_pos, "points": chain_points, "life": 0.28, "total": 0.28, "radius": radius})
 
@@ -1803,14 +1871,14 @@ func _spawn_arsenal_projectile(origin: Vector2, direction: Vector2, speed: float
 		"pos": origin,
 		"velocity": direction.normalized() * speed,
 		"damage": damage * projectile_damage_multiplier,
-		"source": "other",
+		"source": weapon_id,
 		"radius": radius * projectile_area_scale,
 		"life": lifetime,
 		"total_life": lifetime,
 		"return_at": lifetime * 0.5,
 		"returning": returning,
 		"pierce_left": pierce_left,
-		"hit_points": [],
+		"hit_ids": [],
 		"color": _arsenal_color(weapon_id),
 	})
 
@@ -1835,7 +1903,7 @@ func _fire_scythe_ring() -> void:
 func _fire_star_needles() -> void:
 	if enemies.is_empty():
 		return
-	var shot_count := 1 + int((needle_level - 1) / 2.0) + (2 if needle_evolved else 0)
+	var shot_count := 1 + int(needle_level >= 3) + int(needle_level >= 5) + int(needle_level >= 8) + (2 if needle_evolved else 0)
 	var targets := _nearest_enemy_indices(shot_count)
 	for enemy_index in targets:
 		if projectiles.size() >= MAX_PLAYER_PROJECTILES:
@@ -1853,7 +1921,7 @@ func _fire_star_needles() -> void:
 			"life": 1.5,
 			"evolved": needle_evolved,
 			"pierce_left": 2 if needle_evolved else (1 if needle_level >= 6 else 0),
-			"hit_points": [],
+			"hit_ids": [],
 		})
 
 
@@ -1984,46 +2052,47 @@ func _nearest_enemy_direction() -> Vector2:
 
 func _update_projectiles(delta: float) -> void:
 	for projectile_index in range(projectiles.size() - 1, -1, -1):
-		var projectile = projectiles[projectile_index]
+		var projectile: Dictionary = projectiles[projectile_index]
 		if bool(projectile.get("returning", false)) and float(projectile.get("life", 0.0)) <= float(projectile.get("return_at", 0.0)):
+			if not bool(projectile.get("has_returned", false)):
+				projectile["has_returned"] = true
+				projectile["hit_ids"] = []
 			var return_speed: float = maxf(300.0, Vector2(projectile["velocity"]).length())
 			projectile["velocity"] = Vector2(projectile["pos"]).direction_to(player_pos) * return_speed
 			if Vector2(projectile["pos"]).distance_squared_to(player_pos) <= 625.0:
 				projectiles.remove_at(projectile_index)
 				continue
-		projectile["pos"] += projectile["velocity"] * delta
-		projectile["life"] -= delta
+		projectile["pos"] = Vector2(projectile["pos"]) + Vector2(projectile["velocity"]) * delta
+		projectile["life"] = float(projectile["life"]) - delta
+
 		var consumed := false
+		var hit_ids: Array = projectile.get("hit_ids", [])
 		for enemy_index in range(enemies.size() - 1, -1, -1):
 			if enemy_index >= enemies.size():
 				continue
-			var enemy = enemies[enemy_index]
+			var enemy: Dictionary = enemies[enemy_index]
 			var collision_radius: float = float(projectile["radius"]) + float(enemy["radius"])
-			var offset: Vector2 = projectile["pos"] - enemy["pos"]
+			var offset: Vector2 = Vector2(projectile["pos"]) - Vector2(enemy["pos"])
 			if absf(offset.x) > collision_radius or absf(offset.y) > collision_radius:
 				continue
-			if offset.length_squared() <= collision_radius * collision_radius:
-				var already_hit := false
-				for hit_point in projectile.get("hit_points", []):
-					if Vector2(hit_point).distance_squared_to(enemy["pos"]) <= 2304.0:
-						already_hit = true
-						break
-				if already_hit:
-					continue
-				if projectile.get("kind", "") == "fireball":
-					enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), float(projectile.get("burn_time", 0.0)))
-					enemy["burn_tick"] = 0.0
-					enemy["burn_damage"] = maxf(float(enemy.get("burn_damage", 0.0)), float(projectile.get("burn_damage", 0.0)))
-					enemies[enemy_index] = enemy
-				_damage_enemy(enemy_index, float(projectile["damage"]), String(projectile.get("source", "other")))
-				if int(projectile.get("pierce_left", 0)) > 0:
-					projectile["pierce_left"] = int(projectile.get("pierce_left", 0)) - 1
-					var hit_points: Array = projectile.get("hit_points", [])
-					hit_points.append(enemy["pos"])
-					projectile["hit_points"] = hit_points
-				else:
-					consumed = true
-					break
+			if offset.length_squared() > collision_radius * collision_radius:
+				continue
+			var enemy_id := int(enemy.get("id", -1))
+			if hit_ids.has(enemy_id):
+				continue
+			if projectile.get("kind", "") == "fireball":
+				enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), float(projectile.get("burn_time", 0.0)))
+				enemy["burn_tick"] = 0.0
+				enemy["burn_damage"] = maxf(float(enemy.get("burn_damage", 0.0)), float(projectile.get("burn_damage", 0.0)))
+			_damage_enemy(enemy_index, float(projectile["damage"]), String(projectile.get("source", "other")))
+			if int(projectile.get("pierce_left", 0)) > 0:
+				projectile["pierce_left"] = int(projectile["pierce_left"]) - 1
+				hit_ids.append(enemy_id)
+			else:
+				consumed = true
+				break
+		projectile["hit_ids"] = hit_ids
+
 		if consumed or float(projectile["life"]) <= 0.0:
 			projectiles.remove_at(projectile_index)
 		else:
@@ -2044,8 +2113,7 @@ func _update_enemy_statuses(delta: float) -> void:
 				enemy["burn_tick"] = 0.5
 				var burn_damage: float = float(enemy.get("burn_damage", 0.0))
 				var actual_burn_damage := minf(burn_damage, float(enemy["hp"]))
-				total_damage_dealt += actual_burn_damage
-				damage_by_source["burn"] = float(damage_by_source["burn"]) + actual_burn_damage
+				_record_damage("burn", actual_burn_damage)
 				enemy["hp"] = float(enemy["hp"]) - burn_damage
 				enemy["flash"] = 0.08
 				if enemy["boss"]:
@@ -2055,6 +2123,56 @@ func _update_enemy_statuses(delta: float) -> void:
 			_kill_enemy(index)
 			continue
 		enemies[index] = enemy
+
+
+func _apply_enemy_separation(delta: float) -> void:
+	if enemies.size() < 2:
+		return
+	var grid := {}
+	for index in enemies.size():
+		var pos: Vector2 = enemies[index]["pos"]
+		var cell := Vector2i(floori(pos.x / SEPARATION_CELL), floori(pos.y / SEPARATION_CELL))
+		if not grid.has(cell):
+			grid[cell] = []
+		grid[cell].append(index)
+
+	for index in enemies.size():
+		var enemy: Dictionary = enemies[index]
+		if enemy["boss"] or float(enemy.get("dash_time", 0.0)) > 0.0:
+			continue
+		var pos: Vector2 = enemy["pos"]
+		var radius := float(enemy["radius"])
+		var cell := Vector2i(floori(pos.x / SEPARATION_CELL), floori(pos.y / SEPARATION_CELL))
+		var push := Vector2.ZERO
+		var checks := 0
+		for offset_x in range(-1, 2):
+			if checks >= SEPARATION_MAX_CHECKS:
+				break
+			for offset_y in range(-1, 2):
+				if checks >= SEPARATION_MAX_CHECKS:
+					break
+				var neighbor_cell := cell + Vector2i(offset_x, offset_y)
+				if not grid.has(neighbor_cell):
+					continue
+				for other_index in grid[neighbor_cell]:
+					if other_index == index:
+						continue
+					checks += 1
+					if checks > SEPARATION_MAX_CHECKS:
+						break
+					var other: Dictionary = enemies[other_index]
+					var min_distance := radius + float(other["radius"])
+					var offset: Vector2 = pos - Vector2(other["pos"])
+					var distance_squared := offset.length_squared()
+					if distance_squared >= min_distance * min_distance:
+						continue
+					if distance_squared < 0.01:
+						offset = Vector2.from_angle(float(index) * 2.399)
+						distance_squared = 1.0
+					var distance := sqrt(distance_squared)
+					push += offset / distance * (min_distance - distance)
+		if push != Vector2.ZERO:
+			enemy["pos"] = pos + (push * 0.5).limit_length(220.0 * delta)
 
 
 func _update_enemies(delta: float) -> void:
@@ -2068,7 +2186,7 @@ func _update_enemies(delta: float) -> void:
 		var status_speed := float(enemy.get("slow_factor", 1.0)) if float(enemy.get("slow_time", 0.0)) > 0.0 else 1.0
 
 		if enemy["boss"]:
-			enemy = _update_apostle(enemy, delta, status_speed)
+			enemy = _update_apostle(enemy, delta * (APOSTLE_ENRAGE_TEMPO if apostle_enraged else 1.0), status_speed)
 		elif enemy["kind"] == "guardian":
 			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 			enemy["support_cooldown"] = float(enemy.get("support_cooldown", 0.0)) - delta
@@ -2292,38 +2410,68 @@ func _update_hostile_projectiles(delta: float) -> void:
 			hostile_projectiles[index] = projectile
 
 
-func _damage_enemy(index: int, amount: float, source: String = "other") -> void:
-	if index < 0 or index >= enemies.size():
+func _record_damage(source: String, amount: float) -> void:
+	if amount <= 0.0:
 		return
-	var enemy = enemies[index]
+	total_damage_dealt += amount
+	damage_by_source[source] = float(damage_by_source.get(source, 0.0)) + amount
+
+
+func _damage_source_name(source: String) -> String:
+	if ARSENAL_BLUEPRINTS.has(source):
+		return String(ARSENAL_BLUEPRINTS[source]["name"])
+	match source:
+		"starter": return _starter_evolution_name() if scythe_evolved else _starter_weapon_name()
+		"needle": return "追星蜂群" if needle_evolved else "星針"
+		"meteor": return "隕炎彈"
+		"burn": return "燃燒"
+		"storm": return "脈衝雷暴"
+		"drone": return "守望無人機"
+		"gravity": return "重力奇點"
+	return "其他"
+
+
+func _damage_breakdown_text() -> String:
+	var entries: Array = []
+	for source in damage_by_source:
+		var amount := float(damage_by_source[source])
+		if amount >= 1.0:
+			entries.append({"name": _damage_source_name(String(source)), "amount": amount})
+	if entries.is_empty():
+		return "（尚無傷害紀錄）"
+	entries.sort_custom(func(a, b): return float(a["amount"]) > float(b["amount"]))
+	var total := maxf(1.0, total_damage_dealt)
+	var lines: Array[String] = []
+	for index in mini(6, entries.size()):
+		var entry: Dictionary = entries[index]
+		lines.append("%s　%d（%d%%）" % [entry["name"], int(entry["amount"]), roundi(float(entry["amount"]) / total * 100.0)])
+	return "\n".join(lines)
+
+
+func _damage_enemy(index: int, amount: float, source: String = "other") -> void:
+	if index < 0 or index >= enemies.size() or amount <= 0.0:
+		return
+	var enemy: Dictionary = enemies[index]
 	if float(enemy.get("guarded_time", 0.0)) > 0.0 and enemy.get("kind", "") != "guardian" and not bool(enemy.get("boss", false)):
 		amount *= 0.65
-	if not damage_by_source.has(source):
-		source = "other"
 	var elite_shield: float = float(enemy.get("elite_shield", 0.0))
 	if elite_shield > 0.0:
 		var shield_absorbed := minf(amount, elite_shield)
 		enemy["elite_shield"] = elite_shield - shield_absorbed
-		total_damage_dealt += shield_absorbed
-		damage_by_source[source] = float(damage_by_source[source]) + shield_absorbed
+		_record_damage(source, shield_absorbed)
 		amount -= shield_absorbed
 		enemy["flash"] = 0.08
 		if float(enemy["elite_shield"]) <= 0.0:
 			effects.append({"kind": "shield_break", "pos": enemy["pos"], "life": 0.35, "total": 0.35, "radius": float(enemy["radius"]) + 18.0})
 		if amount <= 0.0:
-			enemies[index] = enemy
 			return
-	var actual_damage := minf(amount, float(enemy["hp"]))
-	total_damage_dealt += actual_damage
-	damage_by_source[source] = float(damage_by_source[source]) + actual_damage
+	_record_damage(source, minf(amount, float(enemy["hp"])))
 	enemy["hp"] = float(enemy["hp"]) - amount
 	enemy["flash"] = 0.08
 	if enemy["boss"]:
 		apostle_hp = maxf(0.0, float(enemy["hp"]))
 	if float(enemy["hp"]) <= 0.0:
 		_kill_enemy(index)
-	else:
-		enemies[index] = enemy
 
 
 func _kill_enemy(index: int) -> void:
@@ -2355,20 +2503,16 @@ func _kill_enemy(index: int) -> void:
 		_finish_game(true)
 
 
-func _spawn_splitlings(position: Vector2, count: int) -> void:
+func _spawn_splitlings(origin: Vector2, count: int) -> void:
 	for split_index in count:
-		if enemies.size() >= MAX_ENEMIES:
+		var child := _spawn_mutant("chaser", false, "", false)
+		if child.is_empty():
 			return
-		_spawn_mutant("chaser")
-		var child_index := enemies.size() - 1
-		var child = enemies[child_index]
-		child["pos"] = position + Vector2.from_angle(TAU * float(split_index) / maxf(1.0, float(count))) * 18.0
+		child["pos"] = origin + Vector2.from_angle(TAU * float(split_index) / maxf(1.0, float(count))) * 18.0
 		child["hp"] = minf(float(child["hp"]), 16.0)
 		child["max_hp"] = float(child["hp"])
 		child["radius"] = 10.0
 		child["speed"] = maxf(float(child["speed"]), 92.0)
-		child["elite"] = false
-		enemies[child_index] = child
 
 
 func _drop_experience_gem(position: Vector2, value: float) -> void:
@@ -2498,13 +2642,15 @@ func _update_elite_chests(delta: float) -> void:
 
 
 func _gain_experience(amount: float) -> void:
+	if game_over or not run_started:
+		return
 	experience += amount
 	while experience >= experience_required:
 		experience -= experience_required
 		level += 1
 		experience_required = floorf(12.0 * pow(float(level), 1.28))
 		pending_levels += 1
-	if pending_levels > 0 and not choosing_upgrade:
+	if pending_levels > 0 and not choosing_upgrade and not choosing_elite_reward:
 		_show_upgrade_choices()
 
 
@@ -2596,6 +2742,7 @@ func _select_elite_reward(reward_id: String) -> void:
 			drone_interval *= 0.92
 			gravity_interval *= 0.92
 			meteor_interval *= 0.92
+			arsenal_cooldown_scale *= 0.92
 		"defense_cache":
 			player_max_shield += 12.0
 			player_shield = player_max_shield
@@ -2699,6 +2846,10 @@ func _available_upgrades() -> Array:
 		result.append({"id": "recovery", "name": "修復奈米機 Lv.%d" % (int(meta_levels["recovery"]) + 1), "description": "每秒回復 0.4 生命"})
 	if int(meta_levels["precision"]) < 5 and _can_offer_passive("precision"):
 		result.append({"id": "precision", "name": "精密核心 Lv.%d" % (int(meta_levels["precision"]) + 1), "description": "火球、星針與無人機光彈傷害提高 12%"})
+	if result.is_empty():
+		result.append({"id": "fallback_heal", "name": "星源修復", "description": "回復 30 生命與 10 護盾"})
+		result.append({"id": "fallback_power", "name": "星源餘燼", "description": "所有傷害永久提高 3%"})
+		result.append({"id": "fallback_reroll", "name": "備用重骰", "description": "重骰次數 +1"})
 	return result
 
 
@@ -2967,6 +3118,7 @@ func _apply_standard_upgrade(upgrade_id: String) -> void:
 			drone_interval *= 0.94
 			gravity_interval *= 0.94
 			meteor_interval *= 0.94
+			arsenal_cooldown_scale *= 0.94
 		"area":
 			meta_levels["area"] = int(meta_levels["area"]) + 1
 			scythe_radius += 12.0
@@ -2974,6 +3126,7 @@ func _apply_standard_upgrade(upgrade_id: String) -> void:
 			gravity_radius += 8.0
 			meteor_radius += 8.0
 			projectile_area_scale *= 1.08
+			arsenal_area_scale *= 1.08
 		"recovery":
 			meta_levels["recovery"] = int(meta_levels["recovery"]) + 1
 			recovery_per_second += 0.4
@@ -2981,6 +3134,13 @@ func _apply_standard_upgrade(upgrade_id: String) -> void:
 		"precision":
 			meta_levels["precision"] = int(meta_levels["precision"]) + 1
 			projectile_damage_multiplier *= 1.12
+		"fallback_heal":
+			player_health = minf(player_max_health, player_health + 30.0)
+			player_shield = minf(player_max_shield, player_shield + 10.0)
+		"fallback_power":
+			damage_multiplier *= 1.03
+		"fallback_reroll":
+			rerolls_remaining += 1
 
 
 
@@ -2991,17 +3151,17 @@ func _update_effects(delta: float) -> void:
 		if effect.get("kind", "") == "arsenal_pool":
 			effect["damage_tick"] = float(effect.get("damage_tick", 0.0)) - delta
 			if float(effect["damage_tick"]) <= 0.0:
+				var pool_source := String(effect.get("source", "other"))
+				var pool_slow := float(effect.get("slow_factor", 0.56))
 				for enemy_index in range(enemies.size() - 1, -1, -1):
 					if enemy_index >= enemies.size():
 						continue
-					var enemy = enemies[enemy_index]
+					var enemy: Dictionary = enemies[enemy_index]
 					var hit_radius := float(effect["radius"]) + float(enemy["radius"])
 					if Vector2(effect["pos"]).distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
 						continue
-					enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), 0.72)
-					enemy["slow_factor"] = maxf(0.35, float(effect.get("slow_factor", 0.56))) if enemy["boss"] else float(effect.get("slow_factor", 0.56))
-					enemies[enemy_index] = enemy
-					_damage_enemy(enemy_index, float(effect.get("damage", 8.0)), "other")
+					_apply_slow(enemy, 0.72, maxf(0.35, pool_slow) if enemy["boss"] else pool_slow)
+					_damage_enemy(enemy_index, float(effect.get("damage", 8.0)), pool_source)
 				effect["damage_tick"] = 0.45
 		elif effect.get("kind", "") == "contamination":
 			effect["damage_tick"] = float(effect.get("damage_tick", 0.0)) - delta
@@ -3027,9 +3187,21 @@ func _update_effects(delta: float) -> void:
 			effects[index] = effect
 
 
+func _trim_effects() -> void:
+	if effects.size() <= MAX_EFFECTS:
+		return
+	var overflow := effects.size() - MAX_EFFECTS
+	var kept: Array = []
+	for effect in effects:
+		if overflow > 0 and not GAMEPLAY_EFFECT_KINDS.has(effect.get("kind", "")):
+			overflow -= 1
+			continue
+		kept.append(effect)
+	effects = kept
+
+
 func _enforce_runtime_limits() -> void:
-	if effects.size() > MAX_EFFECTS:
-		effects = effects.slice(effects.size() - MAX_EFFECTS)
+	_trim_effects()
 	if projectiles.size() > MAX_PLAYER_PROJECTILES:
 		projectiles = projectiles.slice(projectiles.size() - MAX_PLAYER_PROJECTILES)
 	if hostile_projectiles.size() > MAX_HOSTILE_PROJECTILES:
@@ -3105,7 +3277,7 @@ func _update_interface(delta: float) -> void:
 	if apostle_present:
 		boss_bar.max_value = apostle_max_hp
 		boss_bar.value = apostle_hp
-		boss_label.text = "使徒｜第 %d 階段" % apostle_phase
+		boss_label.text = "使徒｜第 %d 階段%s" % [apostle_phase, "｜狂暴" if apostle_enraged else ""]
 		boss_bar.visible = true
 		boss_label.visible = true
 	else:
@@ -3125,29 +3297,149 @@ func _finish_game(victory: bool) -> void:
 	interaction_label.visible = false
 	_set_gm_speed(false)
 	gm_panel.visible = false
+	choosing_upgrade = false
+	choosing_elite_reward = false
+	upgrade_overlay.visible = false
 	get_tree().paused = true
 	end_overlay.visible = true
 	end_title.text = "使徒討伐完成" if victory else "任務失敗"
 	end_title.modulate = Color(0.45, 0.95, 1.0) if victory else Color(1.0, 0.4, 0.48)
-	end_summary.text = "生存時間　%s\n擊殺數　%d　最終等級　%d\n造成傷害　%d　承受傷害　%d\n\n傷害分布\n%s　%d｜星針　%d｜脈衝雷暴　%d\n守望無人機　%d｜重力奇點　%d｜隕炎彈　%d｜燃燒　%d\n\n%s" % [
+	end_summary.text = "生存時間　%s\n擊殺數　%d　最終等級　%d\n造成傷害　%d　承受傷害　%d\n\n傷害分布（前 6 名）\n%s\n\n%s" % [
 		_format_countdown(game_time),
 		kills,
 		level,
 		int(total_damage_dealt),
 		int(total_damage_taken),
-		(_starter_evolution_name() if scythe_evolved else _starter_weapon_name()),
-		int(damage_by_source["starter"]),
-		int(damage_by_source["needle"]),
-		int(damage_by_source["storm"]),
-		int(damage_by_source["drone"]),
-		int(damage_by_source["gravity"]),
-		int(damage_by_source["meteor"]),
-		int(damage_by_source["burn"]),
+		_damage_breakdown_text(),
 		("方舟防線暫時安全。" if victory else "重新調整強化後再次出擊。"),
 	]
 
 
 func _draw() -> void:
+	_draw_background()
+	_draw_effect_layer(true)
+	_draw_pickups()
+	_draw_units_y_sorted()
+	_draw_player_projectiles()
+	_draw_hostile_projectiles()
+	_draw_effect_layer(false)
+
+
+func _draw_effect_layer(ground_layer: bool) -> void:
+	for effect in effects:
+		if GROUND_EFFECT_KINDS.has(effect.get("kind", "")) != ground_layer:
+			continue
+		if not _is_world_visible(effect["pos"], float(effect.get("radius", 0.0)) + 48.0):
+			continue
+		_draw_effect(effect)
+
+
+func _draw_units_y_sorted() -> void:
+	var visible_enemies: Array = []
+	for enemy in enemies:
+		if _is_world_visible(enemy["pos"], DRAW_MARGIN + float(enemy["radius"])):
+			visible_enemies.append(enemy)
+	visible_enemies.sort_custom(func(a, b): return Vector2(a["pos"]).y < Vector2(b["pos"]).y)
+	var player_drawn := false
+	for enemy in visible_enemies:
+		if not player_drawn and Vector2(enemy["pos"]).y > player_pos.y:
+			_draw_player()
+			player_drawn = true
+		_draw_enemy(enemy)
+	if not player_drawn:
+		_draw_player()
+
+
+func _draw_pickups() -> void:
+	for gem in gems:
+		var gem_pos: Vector2 = gem["pos"]
+		if not _is_world_visible(gem_pos, 24.0):
+			continue
+		var gem_size := 7.0 if float(gem["value"]) <= 1.0 else 11.0
+		draw_colored_polygon(PackedVector2Array([
+			gem_pos + Vector2(0.0, -gem_size),
+			gem_pos + Vector2(gem_size * 0.72, 0.0),
+			gem_pos + Vector2(0.0, gem_size),
+			gem_pos + Vector2(-gem_size * 0.72, 0.0),
+		]), Color(0.26, 0.95, 1.0))
+
+	for core in repair_cores:
+		var core_pos: Vector2 = core["pos"]
+		if not _is_world_visible(core_pos, 32.0):
+			continue
+		draw_circle(core_pos, 13.0, Color(0.14, 0.95, 0.62, 0.22))
+		draw_arc(core_pos, 12.0, 0.0, TAU, 24, Color(0.35, 1.0, 0.72), 3.0, true)
+		draw_rect(Rect2(core_pos + Vector2(-3.0, -8.0), Vector2(6.0, 16.0)), Color(0.7, 1.0, 0.86))
+		draw_rect(Rect2(core_pos + Vector2(-8.0, -3.0), Vector2(16.0, 6.0)), Color(0.7, 1.0, 0.86))
+
+	for core in evolution_cores:
+		var core_pos: Vector2 = core["pos"]
+		if not _is_world_visible(core_pos, 36.0):
+			continue
+		var pulse := 1.0 + sin(game_time * 5.5) * 0.12
+		var outer_points := PackedVector2Array()
+		for point_index in 6:
+			outer_points.append(core_pos + Vector2.from_angle(TAU * float(point_index) / 6.0) * 16.0 * pulse)
+		draw_colored_polygon(outer_points, Color(1.0, 0.72, 0.18, 0.88))
+		draw_arc(core_pos, 21.0 * pulse, 0.0, TAU, 28, Color(0.45, 0.95, 1.0, 0.78), 4.0, true)
+		draw_circle(core_pos, 6.0, Color(0.96, 1.0, 0.78))
+
+	for chest in elite_chests:
+		var chest_pos: Vector2 = chest["pos"]
+		if not _is_world_visible(chest_pos, 42.0):
+			continue
+		var chest_pulse := 1.0 + sin(float(chest.get("pulse", 0.0))) * 0.08
+		draw_circle(chest_pos, 25.0 * chest_pulse, Color(1.0, 0.72, 0.16, 0.15))
+		draw_rect(Rect2(chest_pos + Vector2(-17.0, -10.0) * chest_pulse, Vector2(34.0, 24.0) * chest_pulse), Color(0.18, 0.12, 0.28), true)
+		draw_rect(Rect2(chest_pos + Vector2(-17.0, -10.0) * chest_pulse, Vector2(34.0, 24.0) * chest_pulse), Color(1.0, 0.72, 0.2), false, 4.0)
+		draw_line(chest_pos + Vector2(-17.0, -2.0), chest_pos + Vector2(17.0, -2.0), Color(1.0, 0.9, 0.45), 4.0, true)
+		draw_circle(chest_pos + Vector2(0.0, 4.0), 4.0, Color(0.48, 0.95, 1.0))
+
+
+func _draw_player_projectiles() -> void:
+	for projectile in projectiles:
+		if not _is_world_visible(projectile["pos"], 48.0):
+			continue
+		var direction: Vector2 = Vector2(projectile["velocity"]).normalized()
+		if projectile.get("kind", "") == "fireball":
+			var fireball_color: Color = projectile.get("color", Color(1.0, 0.42, 0.16))
+			draw_line(projectile["pos"] - direction * 18.0, projectile["pos"], Color(fireball_color, 0.48), 8.0, true)
+			draw_circle(projectile["pos"], float(projectile["radius"]), fireball_color)
+			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.46, fireball_color.lightened(0.55))
+		elif projectile.get("kind", "") == "drone_bolt":
+			draw_line(projectile["pos"] - direction * 15.0, projectile["pos"] + direction * 5.0, Color(1.0, 0.83, 0.26), 5.0, true)
+			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.72, Color(1.0, 0.97, 0.72))
+		elif projectile.get("kind", "") == "arsenal":
+			var arsenal_color: Color = projectile.get("color", Color(0.35, 0.82, 1.0))
+			match projectile.get("weapon_id", ""):
+				"ion_axe":
+					var side := direction.rotated(PI * 0.5) * float(projectile["radius"])
+					draw_colored_polygon(PackedVector2Array([projectile["pos"] + direction * 15.0, projectile["pos"] + side, projectile["pos"] - direction * 15.0, projectile["pos"] - side]), arsenal_color)
+					draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, game_time * 7.0, game_time * 7.0 + 4.7, 16, Color(1.0, 0.82, 0.36, 0.8), 3.0, true)
+				"return_disc":
+					draw_arc(projectile["pos"], float(projectile["radius"]) + 5.0, game_time * 9.0, game_time * 9.0 + 5.2, 20, arsenal_color, 6.0, true)
+					draw_circle(projectile["pos"], 3.0, Color(1.0, 1.0, 0.78))
+				_:
+					draw_line(projectile["pos"] - direction * 14.0, projectile["pos"] + direction * 7.0, Color(arsenal_color, 0.42), maxf(4.0, float(projectile["radius"]) * 0.7), true)
+					draw_circle(projectile["pos"], float(projectile["radius"]), arsenal_color)
+		else:
+			var evolved := bool(projectile.get("evolved", false))
+			var projectile_color := Color(0.95, 0.62, 1.0) if evolved else Color(0.5, 0.95, 1.0)
+			draw_line(projectile["pos"] - direction * (14.0 if evolved else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if evolved else 5.0, true)
+
+
+func _draw_hostile_projectiles() -> void:
+	for projectile in hostile_projectiles:
+		if not _is_world_visible(projectile["pos"], 48.0):
+			continue
+		var hostile_color := Color(1.0, 0.48, 0.12) if projectile.get("kind", "") == "fan" else Color(1.0, 0.2, 0.48)
+		draw_circle(projectile["pos"], float(projectile["radius"]) + 3.0, Color(0.06, 0.0, 0.05, 0.85))
+		draw_circle(projectile["pos"], float(projectile["radius"]), hostile_color)
+		if enemies.size() < LOW_DETAIL_ENEMY_COUNT:
+			draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, 0.0, TAU, 18, hostile_color.lightened(0.42), 2.0, true)
+
+
+func _draw_legacy() -> void:
 	_draw_background()
 
 	for gem in gems:
@@ -3245,8 +3537,9 @@ func _draw() -> void:
 	_draw_player()
 
 
-func _is_world_visible(position: Vector2, margin: float = DRAW_MARGIN) -> bool:
-	var offset := position - player_pos
+func _is_world_visible(world_position: Vector2, margin: float = DRAW_MARGIN) -> bool:
+	var view_center := camera.get_screen_center_position() if is_instance_valid(camera) else player_pos
+	var offset := world_position - view_center
 	return absf(offset.x) <= VIEW_SIZE.x * 0.5 + margin and absf(offset.y) <= VIEW_SIZE.y * 0.5 + margin
 
 
