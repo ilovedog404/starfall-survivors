@@ -39,6 +39,17 @@ func _run() -> void:
 		if game._weapon_level(weapon_id) < 1:
 			_fail("GM 十武器測試未啟用：%s" % weapon_id)
 			return
+	game._update_interface(0.0)
+	if game.weapon_label.visible or game.skill_label.visible:
+		_fail("武器清單或自動能力仍常駐在戰鬥 HUD")
+		return
+	game._update_build_text()
+	if not "自動能力｜疾風短刃" in game.build_text.text or not "折射游標" in game.build_text.text:
+		_fail("Tab 建構面板未整合自動能力與武器資訊")
+		return
+	if game._weapon_upgrade_description("meteor", 2) != "傷害 +10":
+		_fail("武器升級說明的傷害數字格式不正確")
+		return
 
 	# 1. 疾風短刃（鞭）：近距離扇形斬擊。
 	_reset_combat(game)
@@ -125,7 +136,7 @@ func _run() -> void:
 		_fail("折射游標未造成連鎖傷害")
 		return
 
-	print("ARSENAL_TEST_PASS: ten unified weapons, GM unlock, projectiles, fields and damage")
+	print("ARSENAL_TEST_PASS: ten weapons, compact HUD, Tab build, descriptions and damage")
 	get_tree().quit(0)
 
 

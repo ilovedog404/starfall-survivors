@@ -480,7 +480,9 @@ func _build_interface() -> void:
 	enemy_label = _make_hud_label(Vector4(1.0, 0.0, 1.0, 0.0), Vector4(-265.0, 48.0, -20.0, 128.0), 18, HORIZONTAL_ALIGNMENT_RIGHT)
 	weapon_label = _make_hud_label(Vector4(0.0, 1.0, 0.0, 1.0), Vector4(20.0, -160.0, 520.0, -18.0), 17, HORIZONTAL_ALIGNMENT_LEFT)
 	weapon_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	weapon_label.visible = false
 	skill_label = _make_hud_label(Vector4(1.0, 1.0, 1.0, 1.0), Vector4(-480.0, -92.0, -20.0, -18.0), 17, HORIZONTAL_ALIGNMENT_RIGHT)
+	skill_label.visible = false
 	instruction_label = _make_hud_label(Vector4(0.5, 1.0, 0.5, 1.0), Vector4(-360.0, -62.0, 360.0, -20.0), 20, HORIZONTAL_ALIGNMENT_CENTER)
 	interaction_label = _make_hud_label(Vector4(0.5, 1.0, 0.5, 1.0), Vector4(-330.0, -108.0, 330.0, -68.0), 20, HORIZONTAL_ALIGNMENT_CENTER)
 	interaction_label.add_theme_color_override("font_color", Color(0.66, 1.0, 0.82))
@@ -845,8 +847,12 @@ func _update_build_text() -> void:
 	var character_data: Dictionary = _char().data
 	var weapon_lines := PackedStringArray()
 	for weapon_id in WEAPON_BLUEPRINTS:
+		if _weapon_level(weapon_id) <= 0:
+			continue
 		var level_text := "已進化" if _weapon_is_evolved(weapon_id) else _weapon_level_text(_weapon_level(weapon_id), _weapon_max_level(weapon_id))
 		weapon_lines.append("• %s　%s" % [_weapon_name(weapon_id), level_text])
+	var skill_name: String = _starter_evolution_name() if _weapon_is_evolved("starter") else character_data["skill_name"]
+	var skill_interval := float(_weapon_stat("starter", "interval")) * cooldown_scale
 	var passive_cells := PackedStringArray()
 	for passive_id in PASSIVE_BLUEPRINTS:
 		passive_cells.append("• %s　Lv.%d / %d" % [PASSIVE_BLUEPRINTS[passive_id]["name"], int(meta_levels[passive_id]), PASSIVE_MAX_LEVEL])
@@ -856,6 +862,9 @@ func _update_build_text() -> void:
 	build_text.text = "\n".join(PackedStringArray([
 		"%s｜%s" % [character_data["name"], character_data["role"]],
 		String(character_data["passive"]),
+		"",
+		"自動能力｜%s｜每 %.1f 秒發動" % [skill_name, skill_interval],
+		String(character_data["skill"]),
 		"",
 		"武器 %d / %d" % [_weapon_slot_count(), MAX_WEAPON_SLOTS],
 		"\n".join(weapon_lines),
@@ -2030,7 +2039,7 @@ func _weapon_upgrade_description(weapon_id: String, next_level: int) -> String:
 func _describe_weapon_effects(level_effects: Dictionary) -> String:
 	var descriptions := PackedStringArray()
 	if level_effects.has("damage"):
-		descriptions.append("傷害 +%g" % float(level_effects["damage"]))
+		descriptions.append("傷害 +%d" % roundi(float(level_effects["damage"])))
 	if level_effects.has("amount"):
 		descriptions.append("數量 +%d" % int(level_effects["amount"]))
 	if level_effects.has("interval"):
@@ -2205,22 +2214,6 @@ func _update_interface(delta: float) -> void:
 		enemies.size(), threat_level, wave_index, WAVE_TIMES.size(), next_wave_text,
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
-	var active_weapons: Array[String] = []
-	for weapon_id in WEAPON_BLUEPRINTS:
-		var weapon_level := _weapon_level(weapon_id)
-		if weapon_level <= 0:
-			continue
-		var evolved := _weapon_is_evolved(weapon_id)
-		var display_name := _weapon_name(weapon_id)
-		if evolved:
-			display_name = _starter_evolution_name() if weapon_id == "starter" else "追星蜂群"
-		active_weapons.append("%s %s" % [display_name, "進化" if evolved else "Lv.%d" % weapon_level])
-	weapon_label.text = "｜".join(active_weapons.slice(0, 3))
-	if active_weapons.size() > 3:
-		weapon_label.text += "\n" + "｜".join(active_weapons.slice(3))
-	var skill_name: String = _starter_evolution_name() if _weapon_is_evolved("starter") else character_data["skill_name"]
-	skill_label.text = "自動能力｜%s\n每 %.1f 秒發動" % [skill_name, float(_weapon_stat("starter", "interval")) * cooldown_scale]
-	skill_label.modulate = _starter_ring_color()
 	xp_bar.max_value = experience_required
 	xp_bar.value = experience
 	boss_bar.visible = apostle_present
@@ -2397,7 +2390,6 @@ func _draw_map_object_indicator() -> void:
 	var tip := view_center + offset * minf(edge_scale, 1.0)
 	var side := direction.orthogonal() * 12.0
 	draw_colored_polygon(PackedVector2Array([tip + direction * 18.0, tip - direction * 10.0 + side, tip - direction * 10.0 - side]), Color(1.0, 0.78, 0.25, 0.92))
-	draw_string(ui_theme.default_font, tip - direction * 32.0 + Vector2(-40.0, 6.0), "補給 %dm" % int(offset.length() / 32.0), HORIZONTAL_ALIGNMENT_CENTER, 80.0, 15, Color(1.0, 0.9, 0.6))
 
 func _is_world_visible(world_position: Vector2, margin: float = DRAW_MARGIN) -> bool:
 	var view_center: Vector2 = camera.get_screen_center_position() if is_instance_valid(camera) else player_pos
