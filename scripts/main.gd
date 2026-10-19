@@ -88,13 +88,13 @@ const CHARACTERS := {
 # 參照經典生存遊戲武器行為後重新命名、重新數值化的星隕武裝。
 # 所有條目共用同一套資料驅動升級入口，後續批次只需擴充資料與攻擊型態。
 const ARSENAL_BLUEPRINTS := {
-	"rail_blade": {"name": "磁軌飛刃", "pattern": "aimed_burst", "damage": 11.0, "interval": 1.15, "radius": 6.0, "speed": 720.0, "amount": 1, "description": "朝最近異變體高速連射"},
-	"ion_axe": {"name": "離子戰斧", "pattern": "radial_heavy", "damage": 28.0, "interval": 2.4, "radius": 11.0, "speed": 360.0, "amount": 2, "description": "向周圍拋出高傷害旋轉戰斧"},
-	"return_disc": {"name": "折返星環", "pattern": "radial_fast", "damage": 21.0, "interval": 1.8, "radius": 9.0, "speed": 480.0, "amount": 2, "description": "向兩側發射可折返的星環"},
+	"rail_blade": {"name": "磁軌飛刃", "pattern": "aimed_pierce", "damage": 13.0, "interval": 1.0, "radius": 6.0, "speed": 760.0, "amount": 1, "description": "朝最近異變體高速連射並穿透目標"},
+	"ion_axe": {"name": "離子戰斧", "pattern": "heavy_axes", "damage": 32.0, "interval": 2.4, "radius": 13.0, "speed": 330.0, "amount": 1, "description": "向周圍拋出緩慢但高傷害的重型戰斧"},
+	"return_disc": {"name": "折返星環", "pattern": "returning_disc", "damage": 20.0, "interval": 1.85, "radius": 10.0, "speed": 470.0, "amount": 1, "description": "射出會轉向飛回角色的穿透星環"},
 	"orbit_blades": {"name": "軌道刃陣", "pattern": "orbit", "damage": 13.0, "interval": 0.72, "radius": 92.0, "speed": 0.0, "amount": 3, "description": "旋轉刃陣持續切割近身目標"},
 	"plasma_aura": {"name": "等離子場", "pattern": "aura", "damage": 8.0, "interval": 0.82, "radius": 108.0, "speed": 0.0, "amount": 1, "description": "週期傷害並削弱身旁異變體"},
-	"cryo_pool": {"name": "冷媒污染區", "pattern": "target_area", "damage": 19.0, "interval": 2.8, "radius": 74.0, "speed": 0.0, "amount": 1, "description": "在敵群腳下留下低溫傷害區"},
-	"ricochet_ray": {"name": "折射游標", "pattern": "radial_fast", "damage": 16.0, "interval": 1.45, "radius": 7.0, "speed": 610.0, "amount": 2, "description": "沿多方向穿梭的高能游標"},
+	"cryo_pool": {"name": "冷媒污染區", "pattern": "target_area", "damage": 8.0, "interval": 3.0, "radius": 76.0, "speed": 0.0, "amount": 1, "description": "在敵群腳下留下持續傷害與減速區"},
+	"ricochet_ray": {"name": "折射游標", "pattern": "chain", "damage": 17.0, "interval": 1.55, "radius": 7.0, "speed": 610.0, "amount": 2, "description": "在多個鄰近目標之間連鎖折射"},
 }
 
 var rng := RandomNumberGenerator.new()
@@ -1111,18 +1111,20 @@ func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
 	var starter_name := _starter_weapon_name()
 	var starter_display := "%s　已進化" % _starter_evolution_name() if scythe_evolved else "%s　Lv.%d / %d" % [starter_name, scythe_level, _starter_max_level()]
-	build_text.text = "%s｜%s\n%s\n\n武器 %d / %d\n• %s\n• 星針　　　%s　　• 脈衝雷暴　%s\n• 守望無人機　%s　　• 重力奇點　%s\n• 隕炎彈　　%s\n\n能力 %d / %d\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5　　• 修復奈米機　Lv.%d / 5\n• 精密核心　Lv.%d / 5\n\n%s\n%s\n進化核心　%d（精英異變體掉落）\n重抽剩餘　%d" % [
+	var weapon_lines: Array[String] = [
+		"• %s" % starter_display,
+		"• 星針　　　%s" % _weapon_level_text(needle_level),
+		"• 隕炎彈　　%s" % _weapon_level_text(meteor_level),
+	]
+	for weapon_id in ARSENAL_BLUEPRINTS:
+		weapon_lines.append("• %s　%s" % [ARSENAL_BLUEPRINTS[weapon_id]["name"], _weapon_level_text(int(arsenal_levels.get(weapon_id, 0)))])
+	build_text.text = "%s｜%s\n%s\n\n武器 %d / %d\n%s\n\n能力 %d / %d\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5　　• 修復奈米機　Lv.%d / 5\n• 精密核心　Lv.%d / 5\n\n%s\n%s\n進化核心　%d（精英異變體掉落）\n重抽剩餘　%d" % [
 		character_data["name"],
 		character_data["role"],
 		character_data["passive"],
 		_weapon_slot_count(),
 		MAX_WEAPON_SLOTS,
-		starter_display,
-		("未取得" if needle_level == 0 else ("追星蜂群　已進化" if needle_evolved else "Lv.%d / 5" % needle_level)),
-		("未取得" if storm_level == 0 else "Lv.%d / 5" % storm_level),
-		("未取得" if drone_level == 0 else "Lv.%d / 5" % drone_level),
-		("未取得" if gravity_level == 0 else "Lv.%d / 5" % gravity_level),
-		("未取得" if meteor_level == 0 else "Lv.%d / 5" % meteor_level),
+		"\n".join(weapon_lines),
 		_passive_slot_count(),
 		MAX_PASSIVE_SLOTS,
 		int(meta_levels["health"]),
@@ -1139,6 +1141,10 @@ func _update_build_text() -> void:
 		evolution_cores_owned,
 		rerolls_remaining,
 	]
+
+
+func _weapon_level_text(weapon_level: int) -> String:
+	return "未取得" if weapon_level <= 0 else "Lv.%d / 8" % weapon_level
 
 
 func _starter_weapon_name() -> String:
@@ -1164,7 +1170,7 @@ func _starter_ring_color() -> Color:
 
 func _weapon_slot_count() -> int:
 	var count := 1
-	for weapon_level in [needle_level, storm_level, drone_level, gravity_level, meteor_level]:
+	for weapon_level in [needle_level, meteor_level]:
 		if weapon_level > 0:
 			count += 1
 	for weapon_id in arsenal_levels:
@@ -1228,13 +1234,13 @@ func _can_evolve_starter() -> bool:
 
 
 func _can_evolve_needle() -> bool:
-	return not needle_evolved and needle_level >= 5 and int(meta_levels["cooldown"]) >= 3 and evolution_cores_owned > 0
+	return not needle_evolved and needle_level >= 8 and int(meta_levels["cooldown"]) >= 3 and evolution_cores_owned > 0
 
 
 func _needle_evolution_requirement_text() -> String:
 	if needle_evolved:
 		return "共通進化：追星蜂群（完成）"
-	var weapon_state := "完成" if needle_level >= 5 else "%d / 5" % needle_level
+	var weapon_state := "完成" if needle_level >= 8 else "%d / 8" % needle_level
 	var passive_state := "完成" if int(meta_levels["cooldown"]) >= 3 else "%d / 3" % int(meta_levels["cooldown"])
 	var core_state := "已有" if evolution_cores_owned > 0 else "尚未取得"
 	return "共通進化：追星蜂群｜星針 Lv.5（%s）＋冷卻模組 Lv.3（%s）＋進化核心（%s）" % [weapon_state, passive_state, core_state]
@@ -1732,16 +1738,21 @@ func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
 	var radius := float(blueprint["radius"]) * area_scale
 	var amount := int(blueprint["amount"]) + int(weapon_level >= 3) + int(weapon_level >= 6)
 	match pattern:
-		"aimed_burst":
+		"aimed_pierce":
 			var aim := _nearest_enemy_direction()
 			for shot_index in amount:
 				var spread := (float(shot_index) - float(amount - 1) * 0.5) * 0.09
-				_spawn_arsenal_projectile(player_pos, aim.rotated(spread), float(blueprint["speed"]), damage, radius, 1.25, weapon_id)
-		"radial_heavy", "radial_fast":
-			var phase := game_time * (0.7 if pattern == "radial_heavy" else 1.2)
+				_spawn_arsenal_projectile(player_pos, aim.rotated(spread), float(blueprint["speed"]), damage, radius, 1.35, weapon_id, 1 + int(weapon_level >= 6))
+		"heavy_axes":
+			var phase := game_time * 0.55
 			for shot_index in amount:
 				var direction := Vector2.from_angle(phase + TAU * float(shot_index) / float(amount))
-				_spawn_arsenal_projectile(player_pos, direction, float(blueprint["speed"]), damage, radius, 1.8, weapon_id)
+				_spawn_arsenal_projectile(player_pos, direction, float(blueprint["speed"]), damage, radius, 2.0, weapon_id, 1 + int(weapon_level >= 5))
+		"returning_disc":
+			var aim := _nearest_enemy_direction()
+			for shot_index in amount:
+				var spread := (float(shot_index) - float(amount - 1) * 0.5) * 0.32
+				_spawn_arsenal_projectile(player_pos, aim.rotated(spread), float(blueprint["speed"]), damage, radius, 2.15, weapon_id, 4 + int(weapon_level >= 5) * 2, true)
 		"orbit":
 			for enemy_index in range(enemies.size() - 1, -1, -1):
 				var distance := player_pos.distance_to(enemies[enemy_index]["pos"])
@@ -1752,6 +1763,11 @@ func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
 			for enemy_index in range(enemies.size() - 1, -1, -1):
 				var hit_radius := radius + float(enemies[enemy_index]["radius"])
 				if player_pos.distance_squared_to(enemies[enemy_index]["pos"]) <= hit_radius * hit_radius:
+					if weapon_level >= 6:
+						var enemy = enemies[enemy_index]
+						enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), 0.55)
+						enemy["slow_factor"] = 0.82 if enemy["boss"] else 0.68
+						enemies[enemy_index] = enemy
 					_damage_enemy(enemy_index, damage, "other")
 			effects.append({"kind": "arsenal_aura", "pos": player_pos, "life": 0.42, "total": 0.42, "radius": radius})
 		"target_area":
@@ -1760,35 +1776,25 @@ func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
 				if target_index < 0 or target_index >= enemies.size():
 					continue
 				var target_pos: Vector2 = enemies[target_index]["pos"]
-				for enemy_index in range(enemies.size() - 1, -1, -1):
-					var hit_radius := radius + float(enemies[enemy_index]["radius"])
-					if target_pos.distance_squared_to(enemies[enemy_index]["pos"]) <= hit_radius * hit_radius:
-						_damage_enemy(enemy_index, damage, "other")
-				effects.append({"kind": "arsenal_pool", "pos": target_pos, "life": 0.9, "total": 0.9, "radius": radius})
-		"screen_burst":
-			for enemy_index in range(enemies.size() - 1, -1, -1):
-				if not bool(enemies[enemy_index].get("boss", false)) or weapon_level >= 8:
-					_damage_enemy(enemy_index, damage, "other")
-			effects.append({"kind": "arsenal_screen", "pos": player_pos, "life": 0.85, "total": 0.85, "radius": radius})
-		"freeze_cone":
-			var direction := _nearest_enemy_direction()
-			for enemy_index in range(enemies.size() - 1, -1, -1):
-				var offset: Vector2 = enemies[enemy_index]["pos"] - player_pos
-				if offset.length() <= radius and absf(wrapf(offset.angle() - direction.angle(), -PI, PI)) <= 0.62:
-					var enemy = enemies[enemy_index]
-					enemy["slow_time"] = 1.2 + weapon_level * 0.16
-					enemy["slow_factor"] = 0.12 if not enemy["boss"] else 0.48
-					enemies[enemy_index] = enemy
-					_damage_enemy(enemy_index, damage, "other")
-			effects.append({"kind": "arsenal_freeze", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": radius, "angle": direction.angle()})
-		"shield":
-			var shield_gain := 5.0 + weapon_level * 1.5
-			player_max_shield = maxf(player_max_shield, 24.0 + weapon_level * 4.0)
-			player_shield = minf(player_max_shield, player_shield + shield_gain)
-			effects.append({"kind": "arsenal_shield", "pos": player_pos, "life": 0.8, "total": 0.8, "radius": radius + weapon_level * 3.0})
+				effects.append({"kind": "arsenal_pool", "pos": target_pos, "life": 2.2 + weapon_level * 0.12, "total": 2.2 + weapon_level * 0.12, "radius": radius, "damage": damage, "damage_tick": 0.0, "slow_factor": 0.42 if weapon_level >= 5 else 0.56})
+		"chain":
+			var target_indices := _nearest_enemy_indices(amount + 1)
+			var chain_points: Array[Vector2] = [player_pos]
+			for target_index in target_indices:
+				if target_index >= 0 and target_index < enemies.size():
+					chain_points.append(enemies[target_index]["pos"])
+			target_indices.sort()
+			target_indices.reverse()
+			var chain_step := 0
+			for target_index in target_indices:
+				if target_index < 0 or target_index >= enemies.size():
+					continue
+				_damage_enemy(target_index, damage * pow(0.9, chain_step), "other")
+				chain_step += 1
+			effects.append({"kind": "arsenal_chain", "pos": player_pos, "points": chain_points, "life": 0.28, "total": 0.28, "radius": radius})
 
 
-func _spawn_arsenal_projectile(origin: Vector2, direction: Vector2, speed: float, damage: float, radius: float, lifetime: float, weapon_id: String) -> void:
+func _spawn_arsenal_projectile(origin: Vector2, direction: Vector2, speed: float, damage: float, radius: float, lifetime: float, weapon_id: String, pierce_left: int = 0, returning: bool = false) -> void:
 	if projectiles.size() >= MAX_PLAYER_PROJECTILES:
 		return
 	projectiles.append({
@@ -1800,6 +1806,11 @@ func _spawn_arsenal_projectile(origin: Vector2, direction: Vector2, speed: float
 		"source": "other",
 		"radius": radius * projectile_area_scale,
 		"life": lifetime,
+		"total_life": lifetime,
+		"return_at": lifetime * 0.5,
+		"returning": returning,
+		"pierce_left": pierce_left,
+		"hit_points": [],
 		"color": _arsenal_color(weapon_id),
 	})
 
@@ -1841,6 +1852,8 @@ func _fire_star_needles() -> void:
 			"radius": (8.0 if needle_evolved else 6.0) * projectile_area_scale,
 			"life": 1.5,
 			"evolved": needle_evolved,
+			"pierce_left": 2 if needle_evolved else (1 if needle_level >= 6 else 0),
+			"hit_points": [],
 		})
 
 
@@ -1913,7 +1926,7 @@ func _fire_gravity_singularity() -> void:
 func _fire_meteor_round() -> void:
 	if enemies.is_empty():
 		return
-	var strike_count := 1 + (1 if meteor_level >= 3 else 0) + (1 if meteor_level >= 5 else 0)
+	var strike_count := 1 + (1 if meteor_level >= 3 else 0) + (1 if meteor_level >= 5 else 0) + (1 if meteor_level >= 8 else 0)
 	var targets := _nearest_enemy_indices(strike_count)
 	var strike_positions: Array = []
 	for enemy_index in targets:
@@ -1972,24 +1985,45 @@ func _nearest_enemy_direction() -> Vector2:
 func _update_projectiles(delta: float) -> void:
 	for projectile_index in range(projectiles.size() - 1, -1, -1):
 		var projectile = projectiles[projectile_index]
+		if bool(projectile.get("returning", false)) and float(projectile.get("life", 0.0)) <= float(projectile.get("return_at", 0.0)):
+			var return_speed: float = maxf(300.0, Vector2(projectile["velocity"]).length())
+			projectile["velocity"] = Vector2(projectile["pos"]).direction_to(player_pos) * return_speed
+			if Vector2(projectile["pos"]).distance_squared_to(player_pos) <= 625.0:
+				projectiles.remove_at(projectile_index)
+				continue
 		projectile["pos"] += projectile["velocity"] * delta
 		projectile["life"] -= delta
 		var consumed := false
 		for enemy_index in range(enemies.size() - 1, -1, -1):
+			if enemy_index >= enemies.size():
+				continue
 			var enemy = enemies[enemy_index]
 			var collision_radius: float = float(projectile["radius"]) + float(enemy["radius"])
 			var offset: Vector2 = projectile["pos"] - enemy["pos"]
 			if absf(offset.x) > collision_radius or absf(offset.y) > collision_radius:
 				continue
 			if offset.length_squared() <= collision_radius * collision_radius:
+				var already_hit := false
+				for hit_point in projectile.get("hit_points", []):
+					if Vector2(hit_point).distance_squared_to(enemy["pos"]) <= 2304.0:
+						already_hit = true
+						break
+				if already_hit:
+					continue
 				if projectile.get("kind", "") == "fireball":
 					enemy["burn_time"] = maxf(float(enemy.get("burn_time", 0.0)), float(projectile.get("burn_time", 0.0)))
 					enemy["burn_tick"] = 0.0
 					enemy["burn_damage"] = maxf(float(enemy.get("burn_damage", 0.0)), float(projectile.get("burn_damage", 0.0)))
 					enemies[enemy_index] = enemy
 				_damage_enemy(enemy_index, float(projectile["damage"]), String(projectile.get("source", "other")))
-				consumed = true
-				break
+				if int(projectile.get("pierce_left", 0)) > 0:
+					projectile["pierce_left"] = int(projectile.get("pierce_left", 0)) - 1
+					var hit_points: Array = projectile.get("hit_points", [])
+					hit_points.append(enemy["pos"])
+					projectile["hit_points"] = hit_points
+				else:
+					consumed = true
+					break
 		if consumed or float(projectile["life"]) <= 0.0:
 			projectiles.remove_at(projectile_index)
 		else:
@@ -2611,7 +2645,7 @@ func _pick_upgrade_choices(candidates: Array) -> Array:
 
 
 func _is_weapon_upgrade(upgrade_id: String) -> bool:
-	return upgrade_id in ["scythe", "needle", "storm", "drone", "gravity", "meteor"] or upgrade_id.begins_with("arsenal:")
+	return upgrade_id in ["scythe", "needle", "meteor"] or upgrade_id.begins_with("arsenal:")
 
 
 func _reroll_upgrades() -> void:
@@ -2629,23 +2663,13 @@ func _available_upgrades() -> Array:
 			"name": "%s Lv.%d" % [_starter_weapon_name(), scythe_level + 1],
 			"description": _scythe_upgrade_description(scythe_level + 1),
 		})
-	if needle_level < 5 and _can_offer_common_weapon(needle_level):
+	if needle_level < 8 and _can_offer_common_weapon(needle_level):
 		result.append({
 			"id": "needle",
 			"name": "星針 Lv.%d" % (needle_level + 1),
 			"description": _needle_upgrade_description(needle_level + 1),
 		})
-	if storm_level < 5 and _can_offer_common_weapon(storm_level):
-		result.append({
-			"id": "storm",
-			"name": "脈衝雷暴 Lv.%d" % (storm_level + 1),
-			"description": _storm_upgrade_description(storm_level + 1),
-		})
-	if drone_level < 5 and _can_offer_common_weapon(drone_level):
-		result.append({"id": "drone", "name": "守望無人機 Lv.%d" % (drone_level + 1), "description": _drone_upgrade_description(drone_level + 1)})
-	if gravity_level < 5 and _can_offer_common_weapon(gravity_level):
-		result.append({"id": "gravity", "name": "重力奇點 Lv.%d" % (gravity_level + 1), "description": _gravity_upgrade_description(gravity_level + 1)})
-	if meteor_level < 5 and _can_offer_common_weapon(meteor_level):
+	if meteor_level < 8 and _can_offer_common_weapon(meteor_level):
 		result.append({"id": "meteor", "name": "隕炎彈 Lv.%d" % (meteor_level + 1), "description": _meteor_upgrade_description(meteor_level + 1)})
 	for weapon_id in ARSENAL_BLUEPRINTS:
 		var arsenal_level := int(arsenal_levels.get(weapon_id, 0))
@@ -2715,6 +2739,9 @@ func _needle_upgrade_description(next_level: int) -> String:
 		3: return "每次額外發射 1 枚星針"
 		4: return "攻擊間隔縮短 20%"
 		5: return "再增加 1 枚星針，傷害 +8"
+		6: return "星針可額外穿透 1 個目標"
+		7: return "攻擊間隔再縮短 15%"
+		8: return "再增加 1 枚星針，傷害 +10"
 	return "強化星針"
 
 
@@ -2755,13 +2782,81 @@ func _meteor_upgrade_description(next_level: int) -> String:
 		3: return "每輪額外轟擊 1 個目標"
 		4: return "發射間隔縮短 22%"
 		5: return "再增加 1 個目標，爆炸範圍 +20"
+		6: return "爆炸傷害 +18，燃燒時間延長"
+		7: return "發射間隔再縮短 15%"
+		8: return "再增加 1 個目標，爆炸範圍 +18"
 	return "強化隕炎彈"
 
 
 func _arsenal_upgrade_description(weapon_id: String, next_level: int) -> String:
 	var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
+	if next_level == 1:
+		return "取得武器：%s" % blueprint["description"]
+	match weapon_id:
+		"rail_blade":
+			match next_level:
+				2: return "飛刃傷害提高 25%"
+				3: return "每輪額外發射 1 枚飛刃"
+				4: return "發射間隔縮短 15%"
+				5: return "飛刃傷害再提高 30%"
+				6: return "再增加 1 枚飛刃，並額外穿透 1 個目標"
+				7: return "發射間隔再縮短 15%"
+				8: return "磁軌超載：傷害提高 35%"
+		"ion_axe":
+			match next_level:
+				2: return "戰斧傷害提高 25%"
+				3: return "每輪額外拋出 1 把戰斧，尺寸增大"
+				4: return "拋射間隔縮短 15%"
+				5: return "傷害提高 30%，額外穿透 1 個目標"
+				6: return "再增加 1 把戰斧，尺寸再次增大"
+				7: return "拋射間隔再縮短 15%"
+				8: return "離子過載：傷害提高 35%"
+		"return_disc":
+			match next_level:
+				2: return "星環傷害提高 25%"
+				3: return "每輪額外發射 1 枚折返星環"
+				4: return "發射間隔縮短 15%"
+				5: return "傷害提高 30%，可穿透更多目標"
+				6: return "再增加 1 枚星環並擴大尺寸"
+				7: return "發射間隔再縮短 15%"
+				8: return "雙程共振：傷害提高 35%"
+		"orbit_blades":
+			match next_level:
+				2: return "刃陣傷害提高 25%"
+				3: return "增加 1 枚軌道刃並擴大環繞半徑"
+				4: return "切割間隔縮短 15%"
+				5: return "刃陣傷害再提高 30%"
+				6: return "再增加 1 枚軌道刃並擴大半徑"
+				7: return "切割間隔再縮短 15%"
+				8: return "軌道超載：傷害提高 35%"
+		"plasma_aura":
+			match next_level:
+				2: return "等離子傷害提高 25%"
+				3: return "放電範圍擴大 22%"
+				4: return "放電間隔縮短 15%"
+				5: return "等離子傷害再提高 30%"
+				6: return "範圍再次擴大，命中附加短暫減速"
+				7: return "放電間隔再縮短 15%"
+				8: return "電漿飽和：傷害提高 35%"
+		"cryo_pool":
+			match next_level:
+				2: return "冷媒每跳傷害提高 25%"
+				3: return "每輪額外生成 1 處污染區並擴大範圍"
+				4: return "生成間隔縮短 15%"
+				5: return "傷害提高 30%，減速效果增強"
+				6: return "再增加 1 處污染區並擴大範圍"
+				7: return "生成間隔再縮短 15%"
+				8: return "深度冷卻：傷害提高 35%"
+		"ricochet_ray":
+			match next_level:
+				2: return "折射傷害提高 25%"
+				3: return "每輪額外連鎖 1 個目標"
+				4: return "折射間隔縮短 15%"
+				5: return "折射傷害再提高 30%"
+				6: return "再額外連鎖 1 個目標"
+				7: return "折射間隔再縮短 15%"
+				8: return "游標超頻：傷害提高 35%"
 	match next_level:
-		1: return "取得武器：%s" % blueprint["description"]
 		2: return "基礎傷害提高 25%"
 		3: return "投射數量或作用範圍提高"
 		4: return "攻擊冷卻縮短 15%"
@@ -2818,6 +2913,8 @@ func _apply_standard_upgrade(upgrade_id: String) -> void:
 				2: needle_damage += 8.0
 				4: needle_interval *= 0.8
 				5: needle_damage += 8.0
+				7: needle_interval *= 0.85
+				8: needle_damage += 10.0
 		"storm":
 			storm_level += 1
 			match storm_level:
@@ -2843,6 +2940,9 @@ func _apply_standard_upgrade(upgrade_id: String) -> void:
 				2: meteor_damage += 16.0
 				4: meteor_interval *= 0.78
 				5: meteor_radius += 20.0
+				6: meteor_damage += 18.0
+				7: meteor_interval *= 0.85
+				8: meteor_radius += 18.0
 		"health":
 			meta_levels["health"] = int(meta_levels["health"]) + 1
 			player_max_health += 15.0
@@ -2888,7 +2988,22 @@ func _update_effects(delta: float) -> void:
 	for index in range(effects.size() - 1, -1, -1):
 		var effect = effects[index]
 		effect["life"] = float(effect["life"]) - delta
-		if effect.get("kind", "") == "contamination":
+		if effect.get("kind", "") == "arsenal_pool":
+			effect["damage_tick"] = float(effect.get("damage_tick", 0.0)) - delta
+			if float(effect["damage_tick"]) <= 0.0:
+				for enemy_index in range(enemies.size() - 1, -1, -1):
+					if enemy_index >= enemies.size():
+						continue
+					var enemy = enemies[enemy_index]
+					var hit_radius := float(effect["radius"]) + float(enemy["radius"])
+					if Vector2(effect["pos"]).distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
+						continue
+					enemy["slow_time"] = maxf(float(enemy.get("slow_time", 0.0)), 0.72)
+					enemy["slow_factor"] = maxf(0.35, float(effect.get("slow_factor", 0.56))) if enemy["boss"] else float(effect.get("slow_factor", 0.56))
+					enemies[enemy_index] = enemy
+					_damage_enemy(enemy_index, float(effect.get("damage", 8.0)), "other")
+				effect["damage_tick"] = 0.45
+		elif effect.get("kind", "") == "contamination":
 			effect["damage_tick"] = float(effect.get("damage_tick", 0.0)) - delta
 			var hazard_radius: float = float(effect["radius"]) + 16.0
 			if float(effect["damage_tick"]) <= 0.0 and player_pos.distance_squared_to(effect["pos"]) <= hazard_radius * hazard_radius:
@@ -2969,12 +3084,9 @@ func _update_interface(delta: float) -> void:
 		next_wave_text,
 		("戰鬥中" if apostle_spawned else _format_countdown(maxf(0.0, APOSTLE_TIME - game_time))),
 	]
-	weapon_label.text = "%s\n星針 %s｜雷暴 %s\n無人機 %s｜奇點 %s｜隕炎 %s" % [
+	weapon_label.text = "%s\n星針 %s｜隕炎彈 %s" % [
 		("%s｜進化" % _starter_evolution_name() if scythe_evolved else "%s Lv.%d%s" % [_starter_weapon_name(), scythe_level, ("｜待核心" if scythe_level >= _starter_max_level() else "")]),
 		("未取得" if needle_level == 0 else ("追星蜂群｜進化" if needle_evolved else "Lv.%d" % needle_level)),
-		("未取得" if storm_level == 0 else "Lv.%d" % storm_level),
-		("未取得" if drone_level == 0 else "Lv.%d" % drone_level),
-		("未取得" if gravity_level == 0 else "Lv.%d" % gravity_level),
 		("未取得" if meteor_level == 0 else "Lv.%d" % meteor_level),
 	]
 	var active_arsenal: Array[String] = []
@@ -3097,8 +3209,17 @@ func _draw() -> void:
 			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.72, Color(1.0, 0.97, 0.72))
 		elif projectile.get("kind", "") == "arsenal":
 			var arsenal_color: Color = projectile.get("color", Color(0.35, 0.82, 1.0))
-			draw_line(projectile["pos"] - direction * 14.0, projectile["pos"] + direction * 7.0, Color(arsenal_color, 0.42), maxf(4.0, float(projectile["radius"]) * 0.7), true)
-			draw_circle(projectile["pos"], float(projectile["radius"]), arsenal_color)
+			match projectile.get("weapon_id", ""):
+				"ion_axe":
+					var side := direction.rotated(PI * 0.5) * float(projectile["radius"])
+					draw_colored_polygon(PackedVector2Array([projectile["pos"] + direction * 15.0, projectile["pos"] + side, projectile["pos"] - direction * 15.0, projectile["pos"] - side]), arsenal_color)
+					draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, game_time * 7.0, game_time * 7.0 + 4.7, 16, Color(1.0, 0.82, 0.36, 0.8), 3.0, true)
+				"return_disc":
+					draw_arc(projectile["pos"], float(projectile["radius"]) + 5.0, game_time * 9.0, game_time * 9.0 + 5.2, 20, arsenal_color, 6.0, true)
+					draw_circle(projectile["pos"], 3.0, Color(1.0, 1.0, 0.78))
+				_:
+					draw_line(projectile["pos"] - direction * 14.0, projectile["pos"] + direction * 7.0, Color(arsenal_color, 0.42), maxf(4.0, float(projectile["radius"]) * 0.7), true)
+					draw_circle(projectile["pos"], float(projectile["radius"]), arsenal_color)
 		else:
 			var projectile_color := Color(0.95, 0.62, 1.0) if projectile.get("evolved", false) else Color(0.5, 0.95, 1.0)
 			draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
@@ -3431,6 +3552,14 @@ func _draw_effect(effect: Dictionary) -> void:
 		"arsenal_pool":
 			draw_circle(effect["pos"], float(effect["radius"]) * (0.65 + progress * 0.35), Color(0.18, 0.62, 1.0, alpha * 0.18))
 			draw_arc(effect["pos"], float(effect["radius"]), 0.0, TAU, 44, Color(0.55, 0.88, 1.0, alpha), 5.0, true)
+		"arsenal_chain":
+			var chain_points: Array = effect.get("points", [])
+			for point_index in range(chain_points.size() - 1):
+				var chain_start: Vector2 = chain_points[point_index]
+				var chain_end: Vector2 = chain_points[point_index + 1]
+				draw_line(chain_start, chain_end, Color(0.42, 1.0, 0.72, alpha * 0.42), 10.0, true)
+				draw_line(chain_start, chain_end, Color(0.82, 1.0, 0.94, alpha), 3.0, true)
+				draw_circle(chain_end, 8.0 + progress * 5.0, Color(0.5, 1.0, 0.78, alpha))
 		"arsenal_screen":
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(1.0, 0.96, 0.78, alpha * 0.22))
 			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 72, Color(1.0, 0.72, 0.22, alpha), 12.0, true)
