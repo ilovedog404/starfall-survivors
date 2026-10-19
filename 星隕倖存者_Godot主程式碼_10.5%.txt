@@ -45,6 +45,37 @@ const SEPARATION_CELL := 48.0
 const SEPARATION_MAX_CHECKS := 10
 const GAMEPLAY_EFFECT_KINDS := ["arsenal_pool", "contamination", "apostle_hazard", "elite_explosion"]
 const GROUND_EFFECT_KINDS := ["arsenal_pool", "contamination", "apostle_hazard", "ice", "warning", "elite_explosion"]
+const RECYCLE_DISTANCE := 1500.0
+const ELITE_AFFIXES := ["swift", "shielded", "explosive"]
+const PASSIVE_MAX_LEVEL := 5
+const ENEMY_STATS := {
+	"chaser": {"hp": 31.0, "speed": 76.0, "radius": 15.0},
+	"dasher": {"hp": 24.0, "speed": 66.0, "radius": 13.0},
+	"shooter": {"hp": 30.0, "speed": 58.0, "radius": 14.0},
+	"tank": {"hp": 98.0, "speed": 42.0, "radius": 24.0},
+	"guardian": {"hp": 74.0, "speed": 48.0, "radius": 21.0},
+	"splitter": {"hp": 46.0, "speed": 64.0, "radius": 17.0},
+	"contaminant": {"hp": 40.0, "speed": 54.0, "radius": 18.0},
+}
+const SPAWN_TABLE := [
+	[165.0, 0.08, "guardian"],
+	[135.0, 0.16, "splitter"],
+	[105.0, 0.24, "contaminant"],
+	[150.0, 0.34, "tank"],
+	[90.0, 0.48, "shooter"],
+	[35.0, 0.66, "dasher"],
+]
+const PASSIVE_BLUEPRINTS := {
+	"health": {"name": "強化生命", "description": "最大生命 +15，並回復 15 生命"},
+	"speed": {"name": "高速模組", "description": "移動速度提高 8%"},
+	"pickup": {"name": "回收磁場", "description": "星源碎片拾取範圍 +25"},
+	"armor": {"name": "強化裝甲", "description": "護甲 +1，降低每次受到的傷害"},
+	"damage": {"name": "星源增幅", "description": "所有武器傷害提高 12%"},
+	"cooldown": {"name": "冷卻模組", "description": "所有自動武器冷卻縮短 6%"},
+	"area": {"name": "廣域線圈", "description": "範圍武器擴大，投射物尺寸 +8%"},
+	"recovery": {"name": "修復奈米機", "description": "每秒回復 0.4 生命"},
+	"precision": {"name": "精密核心", "description": "所有投射物傷害提高 12%"},
+}
 const CHARACTERS := {
 	"epathy": {
 		"name": "埃帕蒂",
@@ -107,9 +138,6 @@ const ARSENAL_BLUEPRINTS := {
 var rng := RandomNumberGenerator.new()
 var camera: Camera2D
 var battle_music_player: AudioStreamPlayer
-var epathy_texture: Texture2D
-var anubarak_texture: Texture2D
-var enemy_textures: Dictionary = {}
 
 var player_pos := Vector2.ZERO
 var player_speed := 255.0
@@ -132,17 +160,7 @@ var run_started := false
 var build_open := false
 var total_damage_dealt := 0.0
 var total_damage_taken := 0.0
-var damage_by_source := {
-	"starter": 0.0,
-	"needle": 0.0,
-	"storm": 0.0,
-	"drone": 0.0,
-	"gravity": 0.0,
-	"meteor": 0.0,
-	"skill": 0.0,
-	"burn": 0.0,
-	"other": 0.0,
-}
+var damage_by_source: Dictionary = {}
 
 var game_time := 0.0
 var spawn_timer := 0.0
@@ -156,26 +174,13 @@ var instruction_time := 10.0
 var wave_index := 0
 var hud_refresh_timer := 0.0
 var gm_triple_speed := false
-var activated_map_objects: Dictionary = {}
-var nearby_map_object: Dictionary = {}
 var active_map_objects: Array = []
-var map_object_cycle := 0
 var map_object_angle_offset := 0.0
 
 var level := 1
 var experience := 0.0
 var experience_required := 12.0
-var meta_levels := {
-	"health": 0,
-	"speed": 0,
-	"pickup": 0,
-	"armor": 0,
-	"damage": 0,
-	"cooldown": 0,
-	"area": 0,
-	"recovery": 0,
-	"precision": 0,
-}
+var meta_levels: Dictionary = {}
 
 var scythe_level := 1
 var scythe_damage := 24.0
@@ -190,23 +195,6 @@ var needle_interval := 0.72
 var needle_timer := 0.2
 var needle_evolved := false
 
-var storm_level := 0
-var storm_damage := 36.0
-var storm_radius := 56.0
-var storm_interval := 2.2
-var storm_timer := 0.7
-
-var drone_level := 0
-var drone_damage := 13.0
-var drone_interval := 0.82
-var drone_timer := 0.45
-
-var gravity_level := 0
-var gravity_damage := 28.0
-var gravity_radius := 82.0
-var gravity_interval := 3.3
-var gravity_timer := 1.1
-
 var meteor_level := 0
 var meteor_damage := 42.0
 var meteor_radius := 70.0
@@ -218,7 +206,7 @@ var arsenal_timers: Dictionary = {}
 var next_enemy_id := 0
 var elite_spawn_cooldown := 0.0
 var apostle_enraged := false
-var arsenal_cooldown_scale := 1.0
+var cooldown_scale := 1.0
 var arsenal_area_scale := 1.0
 
 var enemies: Array = []
@@ -230,7 +218,6 @@ var evolution_cores: Array = []
 var evolution_cores_owned := 0
 var elite_chests: Array = []
 var pending_elite_rewards := 0
-var elite_rewards_claimed := 0
 var effects: Array = []
 var apostle_spawned := false
 var apostle_present := false
@@ -239,6 +226,7 @@ var apostle_max_hp := 0.0
 var apostle_phase := 1
 
 var canvas_layer: CanvasLayer
+var ui_root: Control
 var ui_theme: Theme
 var time_label: Label
 var stats_label: Label
@@ -269,14 +257,11 @@ var character_portrait: TextureRect
 var character_start_button: Button
 var gm_panel: PanelContainer
 var gm_speed_button: Button
-var gm_level_button: Button
-var gm_reroll_button: Button
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	rng.randomize()
-	_load_art_textures()
 	_setup_battle_music()
 	_ensure_input_map()
 	_create_camera()
@@ -284,19 +269,11 @@ func _ready() -> void:
 	_show_character_select()
 
 
-func _load_art_textures() -> void:
-	epathy_texture = EPATHY_TEXTURE
-	anubarak_texture = ANUBARAK_TEXTURE
-	for enemy_kind in ENEMY_TEXTURES:
-		enemy_textures[enemy_kind] = ENEMY_TEXTURES[enemy_kind]
-
-
 func _setup_battle_music() -> void:
 	battle_music_player = AudioStreamPlayer.new()
 	battle_music_player.name = "BattleMusic"
 	battle_music_player.stream = BATTLE_MUSIC
 	battle_music_player.volume_db = -10.0
-	battle_music_player.process_mode = Node.PROCESS_MODE_ALWAYS
 	battle_music_player.finished.connect(_on_battle_music_finished)
 	add_child(battle_music_player)
 
@@ -337,10 +314,7 @@ func _process(delta: float) -> void:
 	_update_enemies(delta)
 	_apply_enemy_separation(delta)
 	_update_hostile_projectiles(delta)
-	_update_gems(delta)
-	_update_repair_cores(delta)
-	_update_evolution_cores(delta)
-	_update_elite_chests(delta)
+	_update_pickups(delta)
 	_update_effects(delta)
 	_enforce_runtime_limits()
 	_update_interface(delta)
@@ -379,133 +353,104 @@ func _create_camera() -> void:
 	camera.make_current()
 
 
+func _apply_layout(control: Control, anchors: Vector4, offsets: Vector4) -> void:
+	control.anchor_left = anchors.x
+	control.anchor_top = anchors.y
+	control.anchor_right = anchors.z
+	control.anchor_bottom = anchors.w
+	control.offset_left = offsets.x
+	control.offset_top = offsets.y
+	control.offset_right = offsets.z
+	control.offset_bottom = offsets.w
+
+
+func _make_label(parent: Node, text: String, font_size: int, align: HorizontalAlignment = HORIZONTAL_ALIGNMENT_CENTER) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = align
+	label.add_theme_font_size_override("font_size", font_size)
+	parent.add_child(label)
+	return label
+
+
+func _make_button(parent: Node, text: String, min_size: Vector2, font_size: int, on_pressed: Callable) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = min_size
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.add_theme_font_size_override("font_size", font_size)
+	button.pressed.connect(on_pressed)
+	parent.add_child(button)
+	return button
+
+
+func _make_hud_label(anchors: Vector4, offsets: Vector4, font_size: int, align: HorizontalAlignment) -> Label:
+	var label := _make_label(ui_root, "", font_size, align)
+	_apply_layout(label, anchors, offsets)
+	return label
+
+
+func _make_hud_bar(anchors: Vector4, offsets: Vector4) -> ProgressBar:
+	var bar := ProgressBar.new()
+	bar.show_percentage = false
+	ui_root.add_child(bar)
+	_apply_layout(bar, anchors, offsets)
+	return bar
+
+
+func _make_overlay(background: Color) -> ColorRect:
+	var overlay := ColorRect.new()
+	overlay.color = background
+	overlay.visible = false
+	ui_root.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return overlay
+
+
+func _add_panel_column(parent: Control, panel_size: Vector2, separation: int) -> VBoxContainer:
+	var center := CenterContainer.new()
+	parent.add_child(center)
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = panel_size
+	center.add_child(panel)
+	var column := VBoxContainer.new()
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_theme_constant_override("separation", separation)
+	panel.add_child(column)
+	return column
+
+
 func _build_interface() -> void:
 	ui_theme = Theme.new()
 	ui_theme.default_font = load("res://assets/fonts/NotoSansTC-VF.ttf")
 	ui_theme.default_font_size = 18
-
 	canvas_layer = CanvasLayer.new()
 	canvas_layer.name = "Interface"
 	add_child(canvas_layer)
+	ui_root = Control.new()
+	ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_root.theme = ui_theme
+	canvas_layer.add_child(ui_root)
+	ui_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	var hud := Control.new()
-	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.theme = ui_theme
-	canvas_layer.add_child(hud)
-
-	xp_bar = ProgressBar.new()
-	xp_bar.anchor_left = 0.0
-	xp_bar.anchor_right = 1.0
-	xp_bar.offset_left = 18.0
-	xp_bar.offset_top = 14.0
-	xp_bar.offset_right = -18.0
-	xp_bar.offset_bottom = 32.0
-	xp_bar.show_percentage = false
-	hud.add_child(xp_bar)
-
-	time_label = Label.new()
-	time_label.anchor_left = 0.5
-	time_label.anchor_right = 0.5
-	time_label.offset_left = -120.0
-	time_label.offset_top = 40.0
-	time_label.offset_right = 120.0
-	time_label.offset_bottom = 78.0
-	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	time_label.add_theme_font_size_override("font_size", 28)
-	hud.add_child(time_label)
-
-	stats_label = Label.new()
-	stats_label.position = Vector2(20.0, 48.0)
-	stats_label.add_theme_font_size_override("font_size", 18)
-	hud.add_child(stats_label)
-
-	enemy_label = Label.new()
-	enemy_label.anchor_left = 1.0
-	enemy_label.anchor_right = 1.0
-	enemy_label.offset_left = -265.0
-	enemy_label.offset_top = 48.0
-	enemy_label.offset_right = -20.0
-	enemy_label.offset_bottom = 128.0
-	enemy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	enemy_label.add_theme_font_size_override("font_size", 18)
-	hud.add_child(enemy_label)
-
-	weapon_label = Label.new()
-	weapon_label.anchor_top = 1.0
-	weapon_label.anchor_bottom = 1.0
-	weapon_label.offset_left = 20.0
-	weapon_label.offset_top = -160.0
-	weapon_label.offset_right = 520.0
-	weapon_label.offset_bottom = -18.0
+	xp_bar = _make_hud_bar(Vector4(0.0, 0.0, 1.0, 0.0), Vector4(18.0, 14.0, -18.0, 32.0))
+	boss_bar = _make_hud_bar(Vector4(0.25, 0.0, 0.75, 0.0), Vector4(0.0, 86.0, 0.0, 108.0))
+	time_label = _make_hud_label(Vector4(0.5, 0.0, 0.5, 0.0), Vector4(-120.0, 40.0, 120.0, 78.0), 28, HORIZONTAL_ALIGNMENT_CENTER)
+	stats_label = _make_hud_label(Vector4.ZERO, Vector4(20.0, 48.0, 340.0, 130.0), 18, HORIZONTAL_ALIGNMENT_LEFT)
+	enemy_label = _make_hud_label(Vector4(1.0, 0.0, 1.0, 0.0), Vector4(-265.0, 48.0, -20.0, 128.0), 18, HORIZONTAL_ALIGNMENT_RIGHT)
+	weapon_label = _make_hud_label(Vector4(0.0, 1.0, 0.0, 1.0), Vector4(20.0, -160.0, 520.0, -18.0), 17, HORIZONTAL_ALIGNMENT_LEFT)
 	weapon_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	weapon_label.add_theme_font_size_override("font_size", 17)
-	hud.add_child(weapon_label)
-
-	skill_label = Label.new()
-	skill_label.anchor_left = 1.0
-	skill_label.anchor_right = 1.0
-	skill_label.anchor_top = 1.0
-	skill_label.anchor_bottom = 1.0
-	skill_label.offset_left = -480.0
-	skill_label.offset_top = -92.0
-	skill_label.offset_right = -20.0
-	skill_label.offset_bottom = -18.0
-	skill_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	skill_label.add_theme_font_size_override("font_size", 17)
-	hud.add_child(skill_label)
-
-	instruction_label = Label.new()
-	instruction_label.anchor_left = 0.5
-	instruction_label.anchor_right = 0.5
-	instruction_label.anchor_top = 1.0
-	instruction_label.anchor_bottom = 1.0
-	instruction_label.offset_left = -360.0
-	instruction_label.offset_top = -62.0
-	instruction_label.offset_right = 360.0
-	instruction_label.offset_bottom = -20.0
-	instruction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	instruction_label.add_theme_font_size_override("font_size", 20)
-	instruction_label.text = "WASD／方向鍵移動　E 互動　B／Tab 建構　Esc／P 暫停"
-	hud.add_child(instruction_label)
-
-	interaction_label = Label.new()
-	interaction_label.anchor_left = 0.5
-	interaction_label.anchor_right = 0.5
-	interaction_label.anchor_top = 1.0
-	interaction_label.anchor_bottom = 1.0
-	interaction_label.offset_left = -330.0
-	interaction_label.offset_top = -108.0
-	interaction_label.offset_right = 330.0
-	interaction_label.offset_bottom = -68.0
-	interaction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	interaction_label.add_theme_font_size_override("font_size", 20)
+	skill_label = _make_hud_label(Vector4(1.0, 1.0, 1.0, 1.0), Vector4(-480.0, -92.0, -20.0, -18.0), 17, HORIZONTAL_ALIGNMENT_RIGHT)
+	instruction_label = _make_hud_label(Vector4(0.5, 1.0, 0.5, 1.0), Vector4(-360.0, -62.0, 360.0, -20.0), 20, HORIZONTAL_ALIGNMENT_CENTER)
+	interaction_label = _make_hud_label(Vector4(0.5, 1.0, 0.5, 1.0), Vector4(-330.0, -108.0, 330.0, -68.0), 20, HORIZONTAL_ALIGNMENT_CENTER)
 	interaction_label.add_theme_color_override("font_color", Color(0.66, 1.0, 0.82))
-	interaction_label.visible = false
-	hud.add_child(interaction_label)
-
-	boss_bar = ProgressBar.new()
-	boss_bar.anchor_left = 0.25
-	boss_bar.anchor_right = 0.75
-	boss_bar.offset_top = 86.0
-	boss_bar.offset_bottom = 108.0
-	boss_bar.show_percentage = false
-	boss_bar.visible = false
-	hud.add_child(boss_bar)
-
-	boss_label = Label.new()
-	boss_label.anchor_left = 0.25
-	boss_label.anchor_right = 0.75
-	boss_label.offset_top = 108.0
-	boss_label.offset_bottom = 138.0
-	boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	boss_label = _make_hud_label(Vector4(0.25, 0.0, 0.75, 0.0), Vector4(0.0, 108.0, 0.0, 138.0), 18, HORIZONTAL_ALIGNMENT_CENTER)
 	boss_label.text = "使徒｜阿努巴拉克"
-	boss_label.add_theme_font_size_override("font_size", 18)
-	boss_label.visible = false
-	hud.add_child(boss_label)
+	for node in [boss_bar, boss_label, interaction_label]:
+		node.visible = false
 
 	_build_gm_panel()
-
 	_build_pause_overlay()
 	_build_upgrade_overlay()
 	_build_end_overlay()
@@ -517,292 +462,65 @@ func _build_gm_panel() -> void:
 	gm_panel = PanelContainer.new()
 	gm_panel.position = Vector2(16.0, 142.0)
 	gm_panel.custom_minimum_size = Vector2(178.0, 174.0)
-	gm_panel.theme = ui_theme
-	gm_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	gm_panel.visible = false
-	canvas_layer.add_child(gm_panel)
-
+	ui_root.add_child(gm_panel)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 7)
 	gm_panel.add_child(column)
-
-	var title := Label.new()
-	title.text = "GM 測試"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 16)
-	column.add_child(title)
-
-	gm_speed_button = Button.new()
-	gm_speed_button.text = "3 倍速：關"
-	gm_speed_button.custom_minimum_size = Vector2(160.0, 36.0)
-	gm_speed_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	gm_speed_button.pressed.connect(_toggle_gm_speed)
-	column.add_child(gm_speed_button)
-
-	gm_level_button = Button.new()
-	gm_level_button.text = "立即升級"
-	gm_level_button.custom_minimum_size = Vector2(160.0, 36.0)
-	gm_level_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	gm_level_button.pressed.connect(_gm_level_up)
-	column.add_child(gm_level_button)
-
-	gm_reroll_button = Button.new()
-	gm_reroll_button.text = "重骰次數 +1"
-	gm_reroll_button.custom_minimum_size = Vector2(160.0, 36.0)
-	gm_reroll_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	gm_reroll_button.pressed.connect(_gm_add_reroll)
-	column.add_child(gm_reroll_button)
+	_make_label(column, "GM 測試", 16)
+	gm_speed_button = _make_button(column, "3 倍速：關", Vector2(160.0, 36.0), 16, _toggle_gm_speed)
+	_make_button(column, "立即升級", Vector2(160.0, 36.0), 16, _gm_level_up)
+	_make_button(column, "重骰次數 +1", Vector2(160.0, 36.0), 16, _gm_add_reroll)
 
 
 func _build_pause_overlay() -> void:
-	pause_overlay = ColorRect.new()
-	pause_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	pause_overlay.color = Color(0.008, 0.015, 0.045, 0.9)
-	pause_overlay.theme = ui_theme
-	pause_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	pause_overlay.visible = false
-	canvas_layer.add_child(pause_overlay)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.process_mode = Node.PROCESS_MODE_ALWAYS
-	pause_overlay.add_child(center)
-
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(480.0, 430.0)
-	center.add_child(panel)
-
-	var column := VBoxContainer.new()
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.add_theme_constant_override("separation", 20)
-	panel.add_child(column)
-
-	var title := Label.new()
-	title.text = "已暫停"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 38)
-	column.add_child(title)
-
-	var resume_button := Button.new()
-	resume_button.text = "繼續戰鬥"
-	resume_button.custom_minimum_size = Vector2(280.0, 56.0)
-	resume_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	resume_button.add_theme_font_size_override("font_size", 21)
-	resume_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	resume_button.pressed.connect(_resume_game)
-	column.add_child(resume_button)
-
-	var restart_button := Button.new()
-	restart_button.text = "重新開始本角色"
-	restart_button.custom_minimum_size = Vector2(280.0, 54.0)
-	restart_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	restart_button.add_theme_font_size_override("font_size", 19)
-	restart_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	restart_button.pressed.connect(_start_game)
-	column.add_child(restart_button)
-
-	var select_button := Button.new()
-	select_button.text = "返回角色選擇"
-	select_button.custom_minimum_size = Vector2(280.0, 54.0)
-	select_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	select_button.add_theme_font_size_override("font_size", 19)
-	select_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	select_button.pressed.connect(_show_character_select)
-	column.add_child(select_button)
-
-	var hint := Label.new()
-	hint.text = "按 Esc／P 也可繼續"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 16)
-	column.add_child(hint)
+	pause_overlay = _make_overlay(Color(0.008, 0.015, 0.045, 0.9))
+	var column := _add_panel_column(pause_overlay, Vector2(480.0, 430.0), 20)
+	_make_label(column, "已暫停", 38)
+	_make_button(column, "繼續戰鬥", Vector2(280.0, 56.0), 21, _resume_game)
+	_make_button(column, "重新開始本角色", Vector2(280.0, 54.0), 19, _start_game)
+	_make_button(column, "返回角色選擇", Vector2(280.0, 54.0), 19, _show_character_select)
+	_make_label(column, "按 Esc／P 也可繼續", 16)
 
 
 func _build_upgrade_overlay() -> void:
-	upgrade_overlay = ColorRect.new()
-	upgrade_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	upgrade_overlay.color = Color(0.01, 0.02, 0.06, 0.91)
-	upgrade_overlay.theme = ui_theme
-	upgrade_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	upgrade_overlay.visible = false
-	canvas_layer.add_child(upgrade_overlay)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.process_mode = Node.PROCESS_MODE_ALWAYS
-	upgrade_overlay.add_child(center)
-
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(1010.0, 350.0)
-	panel.process_mode = Node.PROCESS_MODE_ALWAYS
-	center.add_child(panel)
-
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 24)
-	column.process_mode = Node.PROCESS_MODE_ALWAYS
-	panel.add_child(column)
-
-	upgrade_title = Label.new()
-	upgrade_title.text = "星源共鳴：選擇一項升級"
-	upgrade_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	upgrade_title.add_theme_font_size_override("font_size", 30)
-	column.add_child(upgrade_title)
-
+	upgrade_overlay = _make_overlay(Color(0.01, 0.02, 0.06, 0.91))
+	var column := _add_panel_column(upgrade_overlay, Vector2(1010.0, 350.0), 24)
+	upgrade_title = _make_label(column, "", 30)
 	upgrade_buttons = HBoxContainer.new()
 	upgrade_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	upgrade_buttons.add_theme_constant_override("separation", 18)
-	upgrade_buttons.process_mode = Node.PROCESS_MODE_ALWAYS
 	column.add_child(upgrade_buttons)
-
-	reroll_button = Button.new()
-	reroll_button.custom_minimum_size = Vector2(260.0, 46.0)
-	reroll_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	reroll_button.add_theme_font_size_override("font_size", 17)
-	reroll_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	reroll_button.pressed.connect(_reroll_upgrades)
-	column.add_child(reroll_button)
-
-	var hint := Label.new()
-	hint.text = "點擊卡片或按 1／2／3 選擇；R 可重抽"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 16)
-	column.add_child(hint)
+	reroll_button = _make_button(column, "", Vector2(260.0, 46.0), 17, _reroll_upgrades)
+	_make_label(column, "點擊卡片或按 1／2／3 選擇；R 可重抽", 16)
 
 
 func _build_end_overlay() -> void:
-	end_overlay = ColorRect.new()
-	end_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	end_overlay.color = Color(0.01, 0.015, 0.04, 0.94)
-	end_overlay.theme = ui_theme
-	end_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	end_overlay.visible = false
-	canvas_layer.add_child(end_overlay)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.process_mode = Node.PROCESS_MODE_ALWAYS
-	end_overlay.add_child(center)
-
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(560.0, 410.0)
-	center.add_child(panel)
-
-	var column := VBoxContainer.new()
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.add_theme_constant_override("separation", 22)
-	panel.add_child(column)
-
-	end_title = Label.new()
-	end_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	end_title.add_theme_font_size_override("font_size", 42)
-	column.add_child(end_title)
-
-	end_summary = Label.new()
-	end_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	end_summary.add_theme_font_size_override("font_size", 20)
-	column.add_child(end_summary)
-
-	var restart_button := Button.new()
-	restart_button.text = "重新開始"
-	restart_button.custom_minimum_size = Vector2(260.0, 58.0)
-	restart_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	restart_button.add_theme_font_size_override("font_size", 22)
-	restart_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	restart_button.pressed.connect(_start_game)
-	column.add_child(restart_button)
-
-	var select_button := Button.new()
-	select_button.text = "返回角色選擇"
-	select_button.custom_minimum_size = Vector2(260.0, 50.0)
-	select_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	select_button.add_theme_font_size_override("font_size", 19)
-	select_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	select_button.pressed.connect(_show_character_select)
-	column.add_child(select_button)
-
-	var disclaimer := Label.new()
-	disclaimer.text = "%s｜非官方同人原型｜所有圖形皆為程式暫代素材" % VERSION
-	disclaimer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	disclaimer.add_theme_font_size_override("font_size", 14)
-	column.add_child(disclaimer)
+	end_overlay = _make_overlay(Color(0.01, 0.015, 0.04, 0.94))
+	var column := _add_panel_column(end_overlay, Vector2(560.0, 410.0), 22)
+	end_title = _make_label(column, "", 42)
+	end_summary = _make_label(column, "", 20)
+	_make_button(column, "重新開始", Vector2(260.0, 58.0), 22, _start_game)
+	_make_button(column, "返回角色選擇", Vector2(260.0, 50.0), 19, _show_character_select)
+	_make_label(column, "%s｜非官方同人原型｜美術素材由使用者提供" % VERSION, 14)
 
 
 func _build_loadout_overlay() -> void:
-	build_overlay = ColorRect.new()
-	build_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	build_overlay.color = Color(0.01, 0.02, 0.06, 0.92)
-	build_overlay.theme = ui_theme
-	build_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	build_overlay.visible = false
-	canvas_layer.add_child(build_overlay)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.process_mode = Node.PROCESS_MODE_ALWAYS
-	build_overlay.add_child(center)
-
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(780.0, 640.0)
-	center.add_child(panel)
-
-	var column := VBoxContainer.new()
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.add_theme_constant_override("separation", 12)
-	panel.add_child(column)
-
-	var title := Label.new()
-	title.text = "當前建構"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 34)
-	column.add_child(title)
-
-	build_text = Label.new()
+	build_overlay = _make_overlay(Color(0.01, 0.02, 0.06, 0.92))
+	var column := _add_panel_column(build_overlay, Vector2(780.0, 640.0), 12)
+	_make_label(column, "當前建構", 34)
+	build_text = _make_label(column, "", 18, HORIZONTAL_ALIGNMENT_LEFT)
 	build_text.custom_minimum_size = Vector2(690.0, 470.0)
-	build_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	build_text.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	build_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	build_text.add_theme_font_size_override("font_size", 18)
-	column.add_child(build_text)
-
-	var hint := Label.new()
-	hint.text = "按 B／Tab 或 Esc／P 返回戰鬥"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 17)
-	column.add_child(hint)
+	_make_label(column, "按 B／Tab 或 Esc／P 返回戰鬥", 17)
 
 
 func _build_character_overlay() -> void:
-	character_overlay = ColorRect.new()
-	character_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	character_overlay.color = Color(0.035, 0.055, 0.055, 0.99)
-	character_overlay.theme = ui_theme
-	character_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	canvas_layer.add_child(character_overlay)
-
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.process_mode = Node.PROCESS_MODE_ALWAYS
-	character_overlay.add_child(center)
-
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(1100.0, 650.0)
-	center.add_child(panel)
-
-	var column := VBoxContainer.new()
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.add_theme_constant_override("separation", 12)
-	panel.add_child(column)
-
-	var title := Label.new()
-	title.text = "星隕倖存者｜荒原先遣"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 38)
-	column.add_child(title)
-
-	var subtitle := Label.new()
-	subtitle.text = "2.5D 改版測試｜埃帕蒂單角色垂直切片"
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	subtitle.add_theme_font_size_override("font_size", 18)
-	column.add_child(subtitle)
+	character_overlay = _make_overlay(Color(0.035, 0.055, 0.055, 0.99))
+	var column := _add_panel_column(character_overlay, Vector2(1100.0, 650.0), 12)
+	_make_label(column, "星隕倖存者｜荒原先遣", 38)
+	_make_label(column, "2.5D 改版測試｜埃帕蒂單角色垂直切片", 18)
 
 	var content := HBoxContainer.new()
 	content.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -812,9 +530,8 @@ func _build_character_overlay() -> void:
 	var portrait_frame := PanelContainer.new()
 	portrait_frame.custom_minimum_size = Vector2(400.0, 440.0)
 	content.add_child(portrait_frame)
-
 	character_portrait = TextureRect.new()
-	character_portrait.texture = epathy_texture
+	character_portrait.texture = EPATHY_TEXTURE
 	character_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	character_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	character_portrait.custom_minimum_size = Vector2(380.0, 420.0)
@@ -826,49 +543,18 @@ func _build_character_overlay() -> void:
 	details.alignment = BoxContainer.ALIGNMENT_CENTER
 	details.add_theme_constant_override("separation", 16)
 	content.add_child(details)
-
 	for character_id in PLAYABLE_CHARACTERS:
 		var data: Dictionary = CHARACTERS[character_id]
-		var button := Button.new()
-		button.custom_minimum_size = Vector2(520.0, 70.0)
-		button.text = "%s　｜　%s" % [data["name"], data["role"]]
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.add_theme_font_size_override("font_size", 22)
-		button.process_mode = Node.PROCESS_MODE_ALWAYS
-		button.pressed.connect(_choose_character.bind(character_id))
-		details.add_child(button)
-		character_buttons[character_id] = button
+		character_buttons[character_id] = _make_button(details, "%s　｜　%s" % [data["name"], data["role"]], Vector2(520.0, 70.0), 22, _choose_character.bind(character_id))
 
-	character_detail = Label.new()
+	character_detail = _make_label(details, "", 18, HORIZONTAL_ALIGNMENT_LEFT)
 	character_detail.custom_minimum_size = Vector2(520.0, 180.0)
-	character_detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	character_detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	character_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	character_detail.add_theme_font_size_override("font_size", 18)
-	details.add_child(character_detail)
-
-	var evolution_hint := Label.new()
-	evolution_hint.text = "二階進化｜暫以青綠星源光效與強化刀光呈現"
-	evolution_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var evolution_hint := _make_label(details, "二階進化｜暫以青綠星源光效與強化刀光呈現", 17, HORIZONTAL_ALIGNMENT_LEFT)
 	evolution_hint.add_theme_color_override("font_color", Color(0.55, 1.0, 0.78))
-	evolution_hint.add_theme_font_size_override("font_size", 17)
-	details.add_child(evolution_hint)
-
-	character_start_button = Button.new()
-	character_start_button.text = "進入星蝕荒原"
-	character_start_button.custom_minimum_size = Vector2(360.0, 64.0)
-	character_start_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	character_start_button.add_theme_font_size_override("font_size", 24)
-	character_start_button.process_mode = Node.PROCESS_MODE_ALWAYS
-	character_start_button.pressed.connect(_start_game)
-	details.add_child(character_start_button)
-
-	var disclaimer := Label.new()
-	disclaimer.text = "%s｜免費、非商業、非官方同人原型｜美術素材由使用者提供" % VERSION
-	disclaimer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	disclaimer.add_theme_font_size_override("font_size", 14)
-	column.add_child(disclaimer)
-
+	character_start_button = _make_button(details, "進入星蝕荒原", Vector2(360.0, 64.0), 24, _start_game)
+	_make_label(column, "%s｜免費、非商業、非官方同人原型｜美術素材由使用者提供" % VERSION, 14)
 	_choose_character(selected_character)
 
 
@@ -888,7 +574,6 @@ func _choose_character(character_id: String) -> void:
 func _show_character_select() -> void:
 	_set_gm_speed(false)
 	_stop_battle_music()
-	interaction_label.visible = false
 	get_tree().paused = true
 	run_started = false
 	game_over = false
@@ -896,12 +581,9 @@ func _show_character_select() -> void:
 	choosing_elite_reward = false
 	manual_paused = false
 	build_open = false
-	upgrade_overlay.visible = false
-	end_overlay.visible = false
-	pause_overlay.visible = false
-	build_overlay.visible = false
+	for node in [upgrade_overlay, end_overlay, pause_overlay, build_overlay, gm_panel, interaction_label]:
+		node.visible = false
 	character_overlay.visible = true
-	gm_panel.visible = false
 	_choose_character(selected_character)
 	character_start_button.grab_focus()
 	queue_redraw()
@@ -916,70 +598,54 @@ func _start_game() -> void:
 	choosing_elite_reward = false
 	manual_paused = false
 	build_open = false
-	pending_levels = 0
-	rerolls_remaining = 1
-	current_upgrade_choices.clear()
-	activated_map_objects.clear()
-	nearby_map_object.clear()
-	active_map_objects.clear()
-	map_object_cycle = 0
-	map_object_angle_offset = rng.randf_range(-0.18, 0.18)
-	interaction_label.visible = false
-	game_time = 0.0
-	spawn_timer = 0.15
-	kills = 0
-	total_damage_dealt = 0.0
-	total_damage_taken = 0.0
-	damage_by_source = {"starter": 0.0, "needle": 0.0, "storm": 0.0, "drone": 0.0, "gravity": 0.0, "meteor": 0.0, "skill": 0.0, "burn": 0.0, "other": 0.0}
-	instruction_time = 10.0
-	wave_index = 0
-	hud_refresh_timer = 0.0
-	next_enemy_id = 0
-	elite_spawn_cooldown = 0.0
-	apostle_enraged = false
-	arsenal_cooldown_scale = 1.0
-	arsenal_area_scale = 1.0
-	instruction_label.text = "WASD／方向鍵移動　E 互動　B／Tab 建構　Esc／P 暫停"
 	_start_battle_music()
 
+	# 局內進度
+	game_time = 0.0
+	spawn_timer = 0.15
+	wave_index = 0
+	kills = 0
+	level = 1
+	experience = 0.0
+	experience_required = 12.0
+	pending_levels = 0
+	pending_elite_rewards = 0
+	rerolls_remaining = 1
+	total_damage_dealt = 0.0
+	total_damage_taken = 0.0
+	damage_by_source.clear()
+	current_upgrade_choices.clear()
+	next_enemy_id = 0
+	elite_spawn_cooldown = 0.0
+	hud_refresh_timer = 0.0
+	for passive_id in PASSIVE_BLUEPRINTS:
+		meta_levels[passive_id] = 0
+
+	# 玩家與角色被動
 	player_pos = Vector2.ZERO
 	player_speed = 255.0
 	player_max_health = 110.0
 	player_health = player_max_health
 	player_max_shield = 24.0
 	player_shield = 8.0
-	player_armor = 0.0
+	player_armor = 3.0 if selected_character == "epathy" else 0.0
 	player_invulnerable = 0.0
 	pickup_radius = 115.0
 	damage_multiplier = 1.0
-	close_damage_multiplier = 1.0
-	burn_duration_multiplier = 1.0
-	slow_effect_multiplier = 1.0
+	close_damage_multiplier = 1.2 if selected_character == "epathy" else 1.0
+	burn_duration_multiplier = 1.3 if selected_character == "lucia" else 1.0
+	slow_effect_multiplier = 1.35 if selected_character == "rafari" else 1.0
 	projectile_area_scale = 1.0
 	projectile_damage_multiplier = 1.0
 	recovery_per_second = 0.0
-	match selected_character:
-		"epathy":
-			player_armor = 3.0
-			close_damage_multiplier = 1.2
-		"lucia":
-			burn_duration_multiplier = 1.3
-		"rafari":
-			slow_effect_multiplier = 1.35
+	cooldown_scale = 1.0
+	arsenal_area_scale = 1.0
 
-	level = 1
-	experience = 0.0
-	experience_required = 12.0
-	meta_levels = {"health": 0, "speed": 0, "pickup": 0, "armor": 0, "damage": 0, "cooldown": 0, "area": 0, "recovery": 0, "precision": 0}
-
+	# 武器
 	scythe_level = 1
 	scythe_damage = 24.0
 	scythe_radius = 132.0
-	match selected_character:
-		"epathy": scythe_interval = 1.4
-		"lucia": scythe_interval = 1.9
-		"rafari": scythe_interval = 2.8
-		_: scythe_interval = 1.55
+	scythe_interval = {"epathy": 1.4, "lucia": 1.9, "rafari": 2.8}.get(selected_character, 1.55)
 	scythe_timer = 0.25
 	scythe_evolved = false
 	needle_level = 0
@@ -987,60 +653,35 @@ func _start_game() -> void:
 	needle_interval = 0.72
 	needle_timer = 0.2
 	needle_evolved = false
-	storm_level = 0
-	storm_damage = 36.0
-	storm_radius = 56.0
-	storm_interval = 2.2
-	storm_timer = 0.7
-	drone_level = 0
-	drone_damage = 13.0
-	drone_interval = 0.82
-	drone_timer = 0.45
-	gravity_level = 0
-	gravity_damage = 28.0
-	gravity_radius = 82.0
-	gravity_interval = 3.3
-	gravity_timer = 1.1
 	meteor_level = 0
 	meteor_damage = 42.0
 	meteor_radius = 70.0
 	meteor_interval = 2.75
 	meteor_timer = 1.35
-	arsenal_levels.clear()
-	arsenal_timers.clear()
 	for weapon_id in ARSENAL_BLUEPRINTS:
 		arsenal_levels[weapon_id] = 0
 		arsenal_timers[weapon_id] = float(ARSENAL_BLUEPRINTS[weapon_id]["interval"]) * 0.45
 
-	enemies.clear()
-	projectiles.clear()
-	hostile_projectiles.clear()
-	gems.clear()
-	repair_cores.clear()
-	evolution_cores.clear()
+	# 場上物件
+	for list in [enemies, projectiles, hostile_projectiles, gems, repair_cores, evolution_cores, elite_chests, effects]:
+		list.clear()
 	evolution_cores_owned = 0
-	elite_chests.clear()
-	pending_elite_rewards = 0
-	elite_rewards_claimed = 0
-	effects.clear()
 	apostle_spawned = false
 	apostle_present = false
+	apostle_enraged = false
 	apostle_hp = 0.0
 	apostle_max_hp = 0.0
 	apostle_phase = 1
-	_spawn_map_object_ring(map_object_angle_offset)
+	_spawn_map_object_ring(rng.randf_range(-0.18, 0.18))
 
+	# 介面
 	camera.position = player_pos
 	camera.reset_smoothing()
-	character_overlay.visible = false
-	build_overlay.visible = false
-	upgrade_overlay.visible = false
-	end_overlay.visible = false
-	pause_overlay.visible = false
+	for node in [character_overlay, build_overlay, upgrade_overlay, end_overlay, pause_overlay, boss_bar, boss_label]:
+		node.visible = false
 	gm_panel.visible = true
-	boss_bar.visible = false
-	boss_label.visible = false
-	instruction_label.visible = true
+	_show_game_notice("WASD／方向鍵移動　E 互動　B／Tab 建構　Esc／P 暫停")
+	instruction_time = 10.0
 	_update_interface(0.0)
 	queue_redraw()
 
@@ -1130,38 +771,35 @@ func _toggle_build_overlay() -> void:
 
 func _update_build_text() -> void:
 	var character_data: Dictionary = CHARACTERS[selected_character]
-	var starter_name := _starter_weapon_name()
-	var starter_display := "%s　已進化" % _starter_evolution_name() if scythe_evolved else "%s　Lv.%d / %d" % [starter_name, scythe_level, _starter_max_level()]
-	var weapon_lines: Array[String] = [
-		"• %s" % starter_display,
-		"• 星針　　　%s" % _weapon_level_text(needle_level),
-		"• 隕炎彈　　%s" % _weapon_level_text(meteor_level),
-	]
+	var starter_text := "%s　已進化" % _starter_evolution_name() if scythe_evolved else "%s　Lv.%d / %d" % [_starter_weapon_name(), scythe_level, _starter_max_level()]
+	var weapon_lines := PackedStringArray([
+		"• " + starter_text,
+		"• 星針　%s" % _weapon_level_text(needle_level),
+		"• 隕炎彈　%s" % _weapon_level_text(meteor_level),
+	])
 	for weapon_id in ARSENAL_BLUEPRINTS:
 		weapon_lines.append("• %s　%s" % [ARSENAL_BLUEPRINTS[weapon_id]["name"], _weapon_level_text(int(arsenal_levels.get(weapon_id, 0)))])
-	build_text.text = "%s｜%s\n%s\n\n武器 %d / %d\n%s\n\n能力 %d / %d\n• 強化生命　Lv.%d / 5　　• 高速模組　Lv.%d / 5\n• 回收磁場　Lv.%d / 5　　• 強化裝甲　Lv.%d / 5\n• 星源增幅　Lv.%d / 5　　• 冷卻模組　Lv.%d / 5\n• 廣域線圈　Lv.%d / 5　　• 修復奈米機　Lv.%d / 5\n• 精密核心　Lv.%d / 5\n\n%s\n%s\n進化核心　%d（精英異變體掉落）\n重抽剩餘　%d" % [
-		character_data["name"],
-		character_data["role"],
-		character_data["passive"],
-		_weapon_slot_count(),
-		MAX_WEAPON_SLOTS,
+	var passive_cells := PackedStringArray()
+	for passive_id in PASSIVE_BLUEPRINTS:
+		passive_cells.append("• %s　Lv.%d / %d" % [PASSIVE_BLUEPRINTS[passive_id]["name"], int(meta_levels[passive_id]), PASSIVE_MAX_LEVEL])
+	var passive_rows := PackedStringArray()
+	for index in range(0, passive_cells.size(), 2):
+		passive_rows.append("　　".join(passive_cells.slice(index, index + 2)))
+	build_text.text = "\n".join(PackedStringArray([
+		"%s｜%s" % [character_data["name"], character_data["role"]],
+		String(character_data["passive"]),
+		"",
+		"武器 %d / %d" % [_weapon_slot_count(), MAX_WEAPON_SLOTS],
 		"\n".join(weapon_lines),
-		_passive_slot_count(),
-		MAX_PASSIVE_SLOTS,
-		int(meta_levels["health"]),
-		int(meta_levels["speed"]),
-		int(meta_levels["pickup"]),
-		int(meta_levels["armor"]),
-		int(meta_levels["damage"]),
-		int(meta_levels["cooldown"]),
-		int(meta_levels["area"]),
-		int(meta_levels["recovery"]),
-		int(meta_levels["precision"]),
+		"",
+		"能力 %d / %d" % [_passive_slot_count(), MAX_PASSIVE_SLOTS],
+		"\n".join(passive_rows),
+		"",
 		_starter_evolution_requirement_text(),
 		_needle_evolution_requirement_text(),
-		evolution_cores_owned,
-		rerolls_remaining,
-	]
+		"進化核心　%d（精英異變體掉落）" % evolution_cores_owned,
+		"重抽剩餘　%d" % rerolls_remaining,
+	]))
 
 
 func _weapon_level_text(weapon_level: int) -> String:
@@ -1179,10 +817,6 @@ func _starter_max_level() -> int:
 func _starter_passive_required_level() -> int:
 	# 疾風短刃沿用鞭系設計：滿級武器只需持有對應生存被動即可進化。
 	return 1 if selected_character == "epathy" else 3
-
-
-func _starter_weapon_trait_text() -> String:
-	return String(CHARACTERS[selected_character]["starter_trait"])
 
 
 func _starter_ring_color() -> Color:
@@ -1325,25 +959,14 @@ func _update_player(delta: float) -> void:
 	player_invulnerable = maxf(0.0, player_invulnerable - delta)
 
 
-func _map_object_name(_kind: String) -> String:
-	return "先遣補給箱"
-
-
 func _spawn_map_object_ring(angle_offset: float) -> void:
 	active_map_objects.clear()
-	nearby_map_object.clear()
 	interaction_label.visible = false
-	map_object_cycle += 1
 	map_object_angle_offset = wrapf(angle_offset, -PI, PI)
 	for chest_index in MAP_CHEST_COUNT:
 		var angle := map_object_angle_offset + TAU * float(chest_index) / float(MAP_CHEST_COUNT)
 		var distance := MAP_CHEST_DISTANCE + rng.randf_range(-195.0, 255.0)
-		active_map_objects.append({
-			"key": "%d:%d" % [map_object_cycle, chest_index],
-			"kind": "supply",
-			"pos": player_pos + Vector2.from_angle(angle) * distance,
-			"angle": angle,
-		})
+		active_map_objects.append({"pos": player_pos + Vector2.from_angle(angle) * distance, "angle": angle})
 
 
 func _nearest_map_object() -> Dictionary:
@@ -1359,32 +982,22 @@ func _nearest_map_object() -> Dictionary:
 
 
 func _update_map_objects() -> void:
-	nearby_map_object = _nearest_map_object()
-	if nearby_map_object.is_empty() or float(nearby_map_object["distance_squared"]) > MAP_OBJECT_RANGE * MAP_OBJECT_RANGE:
-		interaction_label.visible = false
+	var nearest := _nearest_map_object()
+	var in_range := not nearest.is_empty() and float(nearest["distance_squared"]) <= MAP_OBJECT_RANGE * MAP_OBJECT_RANGE
+	interaction_label.visible = in_range
+	if not in_range:
 		return
-	var key: String = nearby_map_object["key"]
-	var kind: String = nearby_map_object["kind"]
-	interaction_label.visible = true
-	interaction_label.text = "[E] 開啟 %s" % _map_object_name(kind)
-	interaction_label.modulate = Color.WHITE
+	interaction_label.text = "[E] 開啟 先遣補給箱"
 	if Input.is_action_just_pressed("interact"):
-		_activate_map_object(nearby_map_object)
+		_activate_map_object(nearest)
 
 
 func _activate_map_object(map_object: Dictionary) -> void:
-	var key: String = map_object["key"]
-	if activated_map_objects.has(key):
-		return
-	var position: Vector2 = map_object["pos"]
-	activated_map_objects[key] = true
 	rerolls_remaining += 1
-	effects.append({"kind": "map_supply", "pos": position, "life": 1.0, "total": 1.0, "radius": 112.0})
-	_gain_experience(16.0 + level * 1.5)
+	effects.append({"kind": "map_supply", "pos": map_object["pos"], "life": 1.0, "total": 1.0, "radius": 112.0})
 	_show_game_notice("先遣補給箱｜獲得星源經驗、重骰 +1")
-	var opened_angle: float = float(map_object.get("angle", player_pos.direction_to(position).angle()))
-	var angle_variation := rng.randf_range(-0.11, 0.11)
-	_spawn_map_object_ring(opened_angle + MAP_CHEST_ANGLE_SHIFT + angle_variation)
+	_spawn_map_object_ring(float(map_object["angle"]) + MAP_CHEST_ANGLE_SHIFT + rng.randf_range(-0.11, 0.11))
+	_gain_experience(16.0 + level * 1.5)
 
 
 func _update_passive_recovery(delta: float) -> void:
@@ -1394,6 +1007,8 @@ func _update_passive_recovery(delta: float) -> void:
 
 
 func _use_epathy_skill() -> void:
+	if enemies.is_empty():
+		return
 	var radius := scythe_radius
 	var slash_direction := _nearest_enemy_direction()
 	var slash_angle := slash_direction.angle()
@@ -1588,103 +1203,50 @@ func _trigger_wave(index: int) -> void:
 	effects.append({"kind": "warning", "pos": player_pos, "life": 1.1, "total": 1.1, "radius": 300.0})
 
 
+func _roll_enemy_kind() -> String:
+	var roll := rng.randf()
+	for entry in SPAWN_TABLE:
+		if game_time > float(entry[0]) and roll < float(entry[1]):
+			return entry[2]
+	return "chaser"
+
+
+func _new_enemy(kind: String, spawn_pos: Vector2, hp: float, speed: float, radius: float) -> Dictionary:
+	return {
+		"id": _take_enemy_id(), "kind": kind, "pos": spawn_pos,
+		"hp": hp, "max_hp": hp, "speed": speed, "radius": radius,
+		"boss": false, "elite": false, "elite_affix": "", "elite_shield": 0.0,
+		"flash": 0.0, "contact_cooldown": 0.0,
+		"burn_time": 0.0, "burn_tick": 0.0, "burn_damage": 0.0,
+		"slow_time": 0.0, "slow_factor": 1.0, "guarded_time": 0.0,
+		"dash_cooldown": rng.randf_range(1.4, 3.2), "dash_time": 0.0, "dash_charge": 0.0, "dash_dir": Vector2.ZERO,
+		"attack_cooldown": rng.randf_range(0.5, 2.2), "shot_charge": 0.0, "shot_dir": Vector2.ZERO,
+		"support_cooldown": rng.randf_range(0.2, 0.8), "contamination_cooldown": rng.randf_range(0.8, 2.2),
+	}
+
+
 func _spawn_mutant(force_kind: String = "", force_elite: bool = false, force_affix: String = "", allow_random_elite: bool = true) -> Dictionary:
 	if enemies.size() >= MAX_ENEMIES:
 		return {}
-	var kind := force_kind
-	if kind.is_empty():
-		var roll := rng.randf()
-		if game_time > 165.0 and roll < 0.08:
-			kind = "guardian"
-		elif game_time > 135.0 and roll < 0.16:
-			kind = "splitter"
-		elif game_time > 105.0 and roll < 0.24:
-			kind = "contaminant"
-		elif game_time > 150.0 and roll < 0.34:
-			kind = "tank"
-		elif game_time > 90.0 and roll < 0.48:
-			kind = "shooter"
-		elif game_time > 35.0 and roll < 0.66:
-			kind = "dasher"
-		else:
-			kind = "chaser"
-	var difficulty := 1.0 + game_time / 360.0
+	var kind := force_kind if not force_kind.is_empty() else _roll_enemy_kind()
+	var stats: Dictionary = ENEMY_STATS.get(kind, ENEMY_STATS["chaser"])
+	var hp := float(stats["hp"]) * (1.0 + game_time / 360.0)
+	var speed := float(stats["speed"]) * (1.0 + game_time / 900.0)
+	var radius := float(stats["radius"])
 	var elite := force_elite
 	if not elite and allow_random_elite and game_time > 50.0 and elite_spawn_cooldown <= 0.0 and rng.randf() < 0.025:
 		elite = true
 		elite_spawn_cooldown = RANDOM_ELITE_COOLDOWN
-	var elite_affix := ""
+	var enemy := _new_enemy(kind, _offscreen_spawn_position(), hp, speed, radius)
 	if elite:
-		var affixes := ["swift", "shielded", "explosive"]
-		elite_affix = force_affix if force_affix in affixes else String(affixes[rng.randi_range(0, 2)])
-	var base_hp := 31.0
-	var base_speed := 76.0
-	var radius := 15.0
-	match kind:
-		"dasher":
-			base_hp = 24.0
-			base_speed = 66.0
-			radius = 13.0
-		"shooter":
-			base_hp = 30.0
-			base_speed = 58.0
-			radius = 14.0
-		"tank":
-			base_hp = 98.0
-			base_speed = 42.0
-			radius = 24.0
-		"guardian":
-			base_hp = 74.0
-			base_speed = 48.0
-			radius = 21.0
-		"splitter":
-			base_hp = 46.0
-			base_speed = 64.0
-			radius = 17.0
-		"contaminant":
-			base_hp = 40.0
-			base_speed = 54.0
-			radius = 18.0
-	var hp := base_hp * difficulty
-	var speed := base_speed * (1.0 + game_time / 900.0)
-	if elite:
+		var affix: String = force_affix if force_affix in ELITE_AFFIXES else ELITE_AFFIXES[rng.randi_range(0, ELITE_AFFIXES.size() - 1)]
 		hp *= 4.2
-		speed *= 1.12
-		radius *= 1.45
-		if elite_affix == "swift":
-			speed *= 1.35
-	var elite_shield := hp * 0.34 if elite_affix == "shielded" else 0.0
-	var enemy := {
-		"id": _take_enemy_id(),
-		"pos": _offscreen_spawn_position(),
-		"hp": hp,
-		"max_hp": hp,
-		"speed": speed,
-		"radius": radius,
-		"kind": kind,
-		"elite": elite,
-		"elite_affix": elite_affix,
-		"elite_shield": elite_shield,
-		"elite_max_shield": elite_shield,
-		"boss": false,
-		"dash_cooldown": rng.randf_range(1.4, 3.2),
-		"dash_time": 0.0,
-		"dash_charge": 0.0,
-		"dash_dir": Vector2.ZERO,
-		"contact_cooldown": 0.0,
-		"attack_cooldown": rng.randf_range(0.5, 2.2),
-		"shot_charge": 0.0,
-		"shot_dir": Vector2.ZERO,
-		"flash": 0.0,
-		"burn_time": 0.0,
-		"burn_tick": 0.0,
-		"burn_damage": 0.0,
-		"slow_time": 0.0,
-		"slow_factor": 1.0,
-		"guarded_time": 0.0,
-		"support_cooldown": rng.randf_range(0.2, 0.8),
-		"contamination_cooldown": rng.randf_range(0.8, 2.2),
-	}
+		enemy.merge({
+			"elite": true, "elite_affix": affix, "hp": hp, "max_hp": hp,
+			"radius": radius * 1.45,
+			"speed": speed * 1.12 * (1.35 if affix == "swift" else 1.0),
+			"elite_shield": hp * 0.34 if affix == "shielded" else 0.0,
+		}, true)
 	enemies.append(enemy)
 	return enemy
 
@@ -1695,53 +1257,19 @@ func _spawn_apostle() -> void:
 	apostle_max_hp = 4800.0
 	apostle_hp = apostle_max_hp
 	apostle_phase = 1
-	enemies.append({
-		"id": _take_enemy_id(),
-		"pos": player_pos + Vector2(0.0, -650.0),
-		"hp": apostle_max_hp,
-		"max_hp": apostle_max_hp,
-		"speed": 48.0,
-		"radius": 64.0,
-		"kind": "apostle",
-		"elite": true,
-		"elite_affix": "",
-		"elite_shield": 0.0,
-		"elite_max_shield": 0.0,
-		"boss": true,
-		"dash_cooldown": 2.4,
-		"dash_time": 0.0,
-		"dash_charge": 0.0,
-		"dash_dir": Vector2.ZERO,
-		"contact_cooldown": 0.0,
-		"attack_cooldown": 1.8,
-		"phase": 1,
-		"phase_transition": 0.0,
-		"attack_cycle": 0,
-		"burst_charge": 0.0,
-		"burst_angle": 0.0,
-		"fan_charge": 0.0,
-		"fan_dir": Vector2.ZERO,
-		"boss_dash_charge": 0.0,
-		"boss_dash_time": 0.0,
-		"boss_dash_dir": Vector2.ZERO,
-		"hazard_charge": 0.0,
-		"hazard_target": Vector2.ZERO,
-		"shot_charge": 0.0,
-		"shot_dir": Vector2.ZERO,
-		"summon_cooldown": 6.0,
-		"flash": 0.0,
-		"burn_time": 0.0,
-		"burn_tick": 0.0,
-		"burn_damage": 0.0,
-		"slow_time": 0.0,
-		"slow_factor": 1.0,
-		"guarded_time": 0.0,
-	})
+	var boss := _new_enemy("apostle", player_pos + Vector2(0.0, -650.0), apostle_max_hp, 48.0, 64.0)
+	boss.merge({
+		"boss": true, "elite": true, "dash_cooldown": 2.4, "attack_cooldown": 1.8,
+		"phase": 1, "phase_transition": 0.0, "attack_cycle": 0,
+		"burst_charge": 0.0, "burst_angle": 0.0, "fan_charge": 0.0, "fan_dir": Vector2.ZERO,
+		"boss_dash_charge": 0.0, "boss_dash_time": 0.0, "boss_dash_dir": Vector2.ZERO,
+		"hazard_charge": 0.0, "hazard_target": Vector2.ZERO, "summon_cooldown": 6.0,
+	}, true)
+	enemies.append(boss)
 	boss_bar.visible = true
 	boss_label.visible = true
 	effects.append({"kind": "warning", "pos": player_pos, "life": 1.8, "total": 1.8, "radius": 420.0})
-	instruction_label.text = "警告：使徒降臨"
-	instruction_label.visible = true
+	_show_game_notice("警告：使徒降臨")
 	instruction_time = 4.0
 
 
@@ -1749,48 +1277,26 @@ func _update_weapons(delta: float) -> void:
 	scythe_timer -= delta
 	if scythe_timer <= 0.0:
 		_fire_scythe_ring()
-		scythe_timer += scythe_interval
-
+		scythe_timer += scythe_interval * cooldown_scale
 	if needle_level > 0:
 		needle_timer -= delta
 		if needle_timer <= 0.0:
 			_fire_star_needles()
-			needle_timer += needle_interval
-
-	if storm_level > 0:
-		storm_timer -= delta
-		if storm_timer <= 0.0:
-			_fire_pulse_storm()
-			storm_timer += storm_interval
-
-	if drone_level > 0:
-		drone_timer -= delta
-		if drone_timer <= 0.0:
-			_fire_watch_drone()
-			drone_timer += drone_interval
-
-	if gravity_level > 0:
-		gravity_timer -= delta
-		if gravity_timer <= 0.0:
-			_fire_gravity_singularity()
-			gravity_timer += gravity_interval
-
+			needle_timer += needle_interval * cooldown_scale
 	if meteor_level > 0:
 		meteor_timer -= delta
 		if meteor_timer <= 0.0:
 			_fire_meteor_round()
-			meteor_timer += meteor_interval
-
+			meteor_timer += meteor_interval * cooldown_scale
 	for weapon_id in arsenal_levels:
 		var weapon_level := int(arsenal_levels[weapon_id])
 		if weapon_level <= 0:
 			continue
-		arsenal_timers[weapon_id] = float(arsenal_timers.get(weapon_id, 0.0)) - delta
+		arsenal_timers[weapon_id] = float(arsenal_timers[weapon_id]) - delta
 		if float(arsenal_timers[weapon_id]) <= 0.0:
 			_fire_arsenal_weapon(weapon_id, weapon_level)
-			var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
-			var cooldown_scale := pow(0.85, float(int(weapon_level >= 4) + int(weapon_level >= 7)))
-			arsenal_timers[weapon_id] = float(blueprint["interval"]) * cooldown_scale * arsenal_cooldown_scale
+			var level_scale := pow(0.85, float(int(weapon_level >= 4) + int(weapon_level >= 7)))
+			arsenal_timers[weapon_id] = float(ARSENAL_BLUEPRINTS[weapon_id]["interval"]) * level_scale * cooldown_scale
 
 
 func _fire_arsenal_weapon(weapon_id: String, weapon_level: int) -> void:
@@ -1888,7 +1394,6 @@ func _arsenal_color(weapon_id: String) -> Color:
 		"ion_axe": return Color(1.0, 0.45, 0.16)
 		"return_disc": return Color(1.0, 0.85, 0.24)
 		"ricochet_ray": return Color(0.42, 1.0, 0.72)
-		"twin_drones": return Color(0.92, 0.48, 1.0)
 		_: return Color(0.35, 0.82, 1.0)
 
 
@@ -1923,72 +1428,6 @@ func _fire_star_needles() -> void:
 			"pierce_left": 2 if needle_evolved else (1 if needle_level >= 6 else 0),
 			"hit_ids": [],
 		})
-
-
-func _fire_pulse_storm() -> void:
-	if enemies.is_empty():
-		return
-	var strike_count := 1 + int((storm_level - 1) / 2.0)
-	var targets := _nearest_enemy_indices(strike_count)
-	var strike_positions: Array = []
-	for enemy_index in targets:
-		if enemy_index >= 0 and enemy_index < enemies.size():
-			strike_positions.append(enemies[enemy_index]["pos"])
-	for position in strike_positions:
-		effects.append({"kind": "storm", "pos": position, "life": 0.42, "total": 0.42, "radius": storm_radius})
-	for enemy_index in range(enemies.size() - 1, -1, -1):
-		var hit_count := 0
-		for position in strike_positions:
-			var hit_radius: float = storm_radius + float(enemies[enemy_index]["radius"])
-			if enemies[enemy_index]["pos"].distance_squared_to(position) <= hit_radius * hit_radius:
-				hit_count += 1
-		if hit_count > 0:
-			_damage_enemy(enemy_index, storm_damage * damage_multiplier * hit_count, "storm")
-
-
-func _fire_watch_drone() -> void:
-	if enemies.is_empty():
-		return
-	var shot_count := 1 + (1 if drone_level >= 3 else 0) + (1 if drone_level >= 5 else 0)
-	var targets := _nearest_enemy_indices(shot_count)
-	for enemy_index in targets:
-		if projectiles.size() >= MAX_PLAYER_PROJECTILES:
-			break
-		if enemy_index < 0 or enemy_index >= enemies.size():
-			continue
-		var direction := player_pos.direction_to(enemies[enemy_index]["pos"])
-		projectiles.append({
-			"kind": "drone_bolt",
-			"pos": player_pos + direction.rotated(-0.45) * 26.0,
-			"velocity": direction * (720.0 + drone_level * 22.0),
-			"damage": drone_damage * damage_multiplier * projectile_damage_multiplier,
-			"source": "drone",
-			"radius": 5.0 * projectile_area_scale,
-			"life": 1.25,
-		})
-
-
-func _fire_gravity_singularity() -> void:
-	if enemies.is_empty():
-		return
-	var nearest := _nearest_enemy_indices(1)
-	if nearest.is_empty():
-		return
-	var target_index: int = nearest[0]
-	if target_index < 0 or target_index >= enemies.size():
-		return
-	var target_pos: Vector2 = enemies[target_index]["pos"]
-	var radius := gravity_radius
-	for enemy_index in range(enemies.size() - 1, -1, -1):
-		var enemy = enemies[enemy_index]
-		var hit_radius: float = radius + float(enemy["radius"])
-		if target_pos.distance_squared_to(enemy["pos"]) > hit_radius * hit_radius:
-			continue
-		var pull_distance := 8.0 if enemy["boss"] else 22.0 + gravity_level * 3.0
-		enemy["pos"] += enemy["pos"].direction_to(target_pos) * pull_distance
-		enemies[enemy_index] = enemy
-		_damage_enemy(enemy_index, gravity_damage * damage_multiplier, "gravity")
-	effects.append({"kind": "gravity", "pos": target_pos, "life": 0.85, "total": 0.85, "radius": radius})
 
 
 func _fire_meteor_round() -> void:
@@ -2247,6 +1686,12 @@ func _update_enemies(delta: float) -> void:
 		else:
 			enemy["pos"] += direction * float(enemy["speed"]) * status_speed * delta
 
+		# 落後太遠的敵人傳送回畫面外圍，避免佔滿上限、前方生不出新怪。
+		if not enemy["boss"] and Vector2(enemy["pos"]).distance_squared_to(player_pos) > RECYCLE_DISTANCE * RECYCLE_DISTANCE:
+			enemy["pos"] = _offscreen_spawn_position()
+			enemy["dash_time"] = 0.0
+			enemy["dash_charge"] = 0.0
+
 		var contact_radius: float = float(enemy["radius"]) + 18.0
 		if enemy["pos"].distance_squared_to(player_pos) <= contact_radius * contact_radius and float(enemy["contact_cooldown"]) <= 0.0:
 			var contact_damage := 22.0 if enemy["boss"] else (14.0 if enemy["kind"] == "tank" else (11.0 if enemy["elite"] else 7.0))
@@ -2425,9 +1870,6 @@ func _damage_source_name(source: String) -> String:
 		"needle": return "追星蜂群" if needle_evolved else "星針"
 		"meteor": return "隕炎彈"
 		"burn": return "燃燒"
-		"storm": return "脈衝雷暴"
-		"drone": return "守望無人機"
-		"gravity": return "重力奇點"
 	return "其他"
 
 
@@ -2565,80 +2007,52 @@ func _take_player_damage(amount: float) -> void:
 		_finish_game(false)
 
 
-func _update_gems(delta: float) -> void:
+func _magnet_pickup(item: Dictionary, magnet_range: float, base_pull: float, pull_gain: float, collect_radius: float, delta: float) -> bool:
+	var item_pos: Vector2 = item["pos"]
+	var distance := item_pos.distance_to(player_pos)
+	if distance <= magnet_range:
+		item_pos = item_pos.move_toward(player_pos, (base_pull + (magnet_range - distance) * pull_gain) * delta)
+		item["pos"] = item_pos
+	return item_pos.distance_squared_to(player_pos) <= collect_radius * collect_radius
+
+
+func _update_pickups(delta: float) -> void:
 	for index in range(gems.size() - 1, -1, -1):
-		var gem = gems[index]
-		var pickup_distance := pickup_radius * 2.0
-		var distance_squared: float = gem["pos"].distance_squared_to(player_pos)
-		if distance_squared <= pickup_distance * pickup_distance:
-			var distance := sqrt(distance_squared)
-			var pull_speed: float = 240.0 + maxf(0.0, pickup_radius * 2.0 - distance) * 3.0
-			gem["pos"] += gem["pos"].direction_to(player_pos) * pull_speed * delta
-		if gem["pos"].distance_squared_to(player_pos) <= 625.0:
-			_gain_experience(float(gem["value"]))
+		if _magnet_pickup(gems[index], pickup_radius * 2.0, 240.0, 3.0, 25.0, delta):
+			var value := float(gems[index]["value"])
 			gems.remove_at(index)
-		else:
-			gems[index] = gem
-
-
-func _update_repair_cores(delta: float) -> void:
+			_gain_experience(value)
 	for index in range(repair_cores.size() - 1, -1, -1):
-		var core = repair_cores[index]
-		var pickup_distance := pickup_radius * 1.5
-		var distance_squared: float = core["pos"].distance_squared_to(player_pos)
-		if distance_squared <= pickup_distance * pickup_distance:
-			var distance := sqrt(distance_squared)
-			var pull_speed := 210.0 + maxf(0.0, pickup_radius * 1.5 - distance) * 3.2
-			core["pos"] += core["pos"].direction_to(player_pos) * pull_speed * delta
-		if core["pos"].distance_squared_to(player_pos) <= 729.0:
-			var missing_health := maxf(0.0, player_max_health - player_health)
-			var restored := minf(float(core["heal"]), missing_health)
-			player_health += restored
-			if restored <= 0.0:
-				player_shield = minf(player_max_shield, player_shield + 8.0)
-			instruction_label.text = "修復核心：%s" % ("護盾 +8" if restored <= 0.0 else "生命 +%d" % int(restored))
-			instruction_label.visible = true
-			instruction_time = 2.0
-			effects.append({"kind": "repair", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": 72.0})
+		if _magnet_pickup(repair_cores[index], pickup_radius * 1.5, 210.0, 3.2, 27.0, delta):
+			var heal := float(repair_cores[index]["heal"])
 			repair_cores.remove_at(index)
-		else:
-			repair_cores[index] = core
-
-
-func _update_evolution_cores(delta: float) -> void:
+			_collect_repair_core(heal)
 	for index in range(evolution_cores.size() - 1, -1, -1):
-		var core = evolution_cores[index]
-		var pickup_distance := pickup_radius * 1.65
-		var distance_squared: float = core["pos"].distance_squared_to(player_pos)
-		if distance_squared <= pickup_distance * pickup_distance:
-			var distance := sqrt(distance_squared)
-			var pull_speed: float = 225.0 + maxf(0.0, pickup_distance - distance) * 3.4
-			core["pos"] += core["pos"].direction_to(player_pos) * pull_speed * delta
-		if core["pos"].distance_squared_to(player_pos) <= 729.0:
-			evolution_cores_owned = 1
+		if _magnet_pickup(evolution_cores[index], pickup_radius * 1.65, 225.0, 3.4, 27.0, delta):
 			evolution_cores.remove_at(index)
+			evolution_cores_owned = 1
 			if not _try_consume_evolution_core():
 				_show_game_notice("取得進化核心｜達成條件後自動進化")
-		else:
-			evolution_cores[index] = core
-
-
-func _update_elite_chests(delta: float) -> void:
 	for index in range(elite_chests.size() - 1, -1, -1):
-		var chest = elite_chests[index]
+		var chest: Dictionary = elite_chests[index]
 		chest["pulse"] = float(chest.get("pulse", 0.0)) + delta * 3.0
-		var distance_squared: float = chest["pos"].distance_squared_to(player_pos)
-		if distance_squared <= pow(pickup_radius + 40.0, 2.0):
-			var pull_speed := 180.0 + maxf(0.0, pickup_radius - sqrt(distance_squared)) * 4.0
-			chest["pos"] += chest["pos"].direction_to(player_pos) * pull_speed * delta
-		if chest["pos"].distance_squared_to(player_pos) <= 1024.0:
+		if _magnet_pickup(chest, pickup_radius + 40.0, 180.0, 4.0, 32.0, delta):
 			elite_chests.remove_at(index)
 			pending_elite_rewards += 1
 			effects.append({"kind": "elite_chest", "pos": player_pos, "life": 0.7, "total": 0.7, "radius": 92.0})
-			if not choosing_upgrade and not choosing_elite_reward:
-				_show_elite_reward_choices()
-		else:
-			elite_chests[index] = chest
+	if pending_elite_rewards > 0 and not choosing_upgrade and not choosing_elite_reward and not game_over:
+		_show_elite_reward_choices()
+
+
+func _collect_repair_core(heal: float) -> void:
+	var restored := minf(heal, player_max_health - player_health)
+	if restored > 0.0:
+		player_health += restored
+		_show_game_notice("修復核心：生命 +%d" % int(restored))
+	else:
+		player_shield = minf(player_max_shield, player_shield + 8.0)
+		_show_game_notice("修復核心：護盾 +8")
+	effects.append({"kind": "repair", "pos": player_pos, "life": 0.55, "total": 0.55, "radius": 72.0})
 
 
 func _gain_experience(amount: float) -> void:
@@ -2654,32 +2068,47 @@ func _gain_experience(amount: float) -> void:
 		_show_upgrade_choices()
 
 
-func _show_upgrade_choices() -> void:
-	choosing_upgrade = true
-	choosing_elite_reward = false
+func _show_choice_cards(title: String, options: Array, tag_of: Callable, on_pick: Callable) -> void:
 	get_tree().paused = true
 	upgrade_overlay.visible = true
-	upgrade_title.text = "星源共鳴｜等級 %d" % level
-
+	upgrade_title.text = title
 	for child in upgrade_buttons.get_children():
 		upgrade_buttons.remove_child(child)
 		child.queue_free()
-
-	var candidates := _pick_upgrade_choices(_available_upgrades())
-	var option_count := mini(3, candidates.size())
-	current_upgrade_choices.clear()
-	for index in option_count:
-		var option = candidates[index]
-		current_upgrade_choices.append(option)
+	current_upgrade_choices = options.slice(0, 3)
+	for index in current_upgrade_choices.size():
+		var option: Dictionary = current_upgrade_choices[index]
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(285.0, 205.0)
-		var category := "進化" if String(option["id"]).ends_with("_evolution") else ("武器" if _is_weapon_upgrade(option["id"]) else "能力")
-		button.text = "[%d]【%s】%s\n\n%s" % [index + 1, category, option["name"], option["description"]]
+		button.text = "[%d]【%s】%s\n\n%s" % [index + 1, tag_of.call(option), option["name"], option["description"]]
 		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_theme_font_size_override("font_size", 19)
-		button.process_mode = Node.PROCESS_MODE_ALWAYS
-		button.pressed.connect(_select_upgrade.bind(option["id"]))
+		button.pressed.connect(on_pick.bind(option["id"]))
 		upgrade_buttons.add_child(button)
+
+
+func _advance_choice_queue() -> void:
+	if game_over:
+		return
+	if pending_levels > 0:
+		_show_upgrade_choices()
+	elif pending_elite_rewards > 0:
+		_show_elite_reward_choices()
+	else:
+		choosing_upgrade = false
+		choosing_elite_reward = false
+		upgrade_overlay.visible = false
+		get_tree().paused = false
+
+
+func _upgrade_category(option: Dictionary) -> String:
+	return "武器" if _is_weapon_upgrade(option["id"]) else "能力"
+
+
+func _show_upgrade_choices() -> void:
+	choosing_upgrade = true
+	choosing_elite_reward = false
+	_show_choice_cards("星源共鳴｜等級 %d" % level, _pick_upgrade_choices(_available_upgrades()), _upgrade_category, _select_upgrade)
 	reroll_button.text = "[R] 重新抽取（剩餘 %d 次）" % rerolls_remaining
 	reroll_button.disabled = rerolls_remaining <= 0
 
@@ -2689,28 +2118,9 @@ func _show_elite_reward_choices() -> void:
 		return
 	choosing_upgrade = false
 	choosing_elite_reward = true
-	get_tree().paused = true
-	upgrade_overlay.visible = true
-	upgrade_title.text = "精英戰利品｜選擇一項特殊補給"
-
-	for child in upgrade_buttons.get_children():
-		upgrade_buttons.remove_child(child)
-		child.queue_free()
-
 	var candidates := _elite_reward_candidates()
 	candidates.shuffle()
-	current_upgrade_choices.clear()
-	for index in mini(3, candidates.size()):
-		var option = candidates[index]
-		current_upgrade_choices.append(option)
-		var button := Button.new()
-		button.custom_minimum_size = Vector2(285.0, 205.0)
-		button.text = "[%d]【戰利品】%s\n\n%s" % [index + 1, option["name"], option["description"]]
-		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		button.add_theme_font_size_override("font_size", 19)
-		button.process_mode = Node.PROCESS_MODE_ALWAYS
-		button.pressed.connect(_select_elite_reward.bind(option["id"]))
-		upgrade_buttons.add_child(button)
+	_show_choice_cards("精英戰利品｜選擇一項特殊補給", candidates, func(_option): return "戰利品", _select_elite_reward)
 	reroll_button.text = "精英戰利品不可重抽"
 	reroll_button.disabled = true
 
@@ -2736,13 +2146,7 @@ func _select_elite_reward(reward_id: String) -> void:
 		"damage_boost":
 			damage_multiplier *= 1.1
 		"overclock":
-			scythe_interval *= 0.92
-			needle_interval *= 0.92
-			storm_interval *= 0.92
-			drone_interval *= 0.92
-			gravity_interval *= 0.92
-			meteor_interval *= 0.92
-			arsenal_cooldown_scale *= 0.92
+			cooldown_scale *= 0.92
 		"defense_cache":
 			player_max_shield += 12.0
 			player_shield = player_max_shield
@@ -2754,17 +2158,8 @@ func _select_elite_reward(reward_id: String) -> void:
 		"evolution_core":
 			evolution_cores_owned = 1
 			_try_consume_evolution_core()
-
-	elite_rewards_claimed += 1
 	pending_elite_rewards = maxi(0, pending_elite_rewards - 1)
-	if pending_elite_rewards > 0:
-		_show_elite_reward_choices()
-	elif pending_levels > 0:
-		_show_upgrade_choices()
-	else:
-		choosing_elite_reward = false
-		upgrade_overlay.visible = false
-		get_tree().paused = false
+	_advance_choice_queue()
 
 
 func _pick_upgrade_choices(candidates: Array) -> Array:
@@ -2805,51 +2200,25 @@ func _reroll_upgrades() -> void:
 func _available_upgrades() -> Array:
 	var result: Array = []
 	if scythe_level < _starter_max_level():
-		result.append({
-			"id": "scythe",
-			"name": "%s Lv.%d" % [_starter_weapon_name(), scythe_level + 1],
-			"description": _scythe_upgrade_description(scythe_level + 1),
-		})
+		result.append({"id": "scythe", "name": "%s Lv.%d" % [_starter_weapon_name(), scythe_level + 1], "description": _scythe_upgrade_description(scythe_level + 1)})
 	if needle_level < 8 and _can_offer_common_weapon(needle_level):
-		result.append({
-			"id": "needle",
-			"name": "星針 Lv.%d" % (needle_level + 1),
-			"description": _needle_upgrade_description(needle_level + 1),
-		})
+		result.append({"id": "needle", "name": "星針 Lv.%d" % (needle_level + 1), "description": _needle_upgrade_description(needle_level + 1)})
 	if meteor_level < 8 and _can_offer_common_weapon(meteor_level):
 		result.append({"id": "meteor", "name": "隕炎彈 Lv.%d" % (meteor_level + 1), "description": _meteor_upgrade_description(meteor_level + 1)})
 	for weapon_id in ARSENAL_BLUEPRINTS:
 		var arsenal_level := int(arsenal_levels.get(weapon_id, 0))
-		if arsenal_level >= 8 or not _can_offer_common_weapon(arsenal_level):
-			continue
-		var blueprint: Dictionary = ARSENAL_BLUEPRINTS[weapon_id]
-		result.append({
-			"id": "arsenal:%s" % weapon_id,
-			"name": "%s Lv.%d" % [blueprint["name"], arsenal_level + 1],
-			"description": _arsenal_upgrade_description(weapon_id, arsenal_level + 1),
-		})
-	if int(meta_levels["health"]) < 5 and _can_offer_passive("health"):
-		result.append({"id": "health", "name": "強化生命 Lv.%d" % (int(meta_levels["health"]) + 1), "description": "最大生命 +15，並回復 15 生命"})
-	if int(meta_levels["speed"]) < 5 and _can_offer_passive("speed"):
-		result.append({"id": "speed", "name": "高速模組 Lv.%d" % (int(meta_levels["speed"]) + 1), "description": "移動速度提高 8%"})
-	if int(meta_levels["pickup"]) < 5 and _can_offer_passive("pickup"):
-		result.append({"id": "pickup", "name": "回收磁場 Lv.%d" % (int(meta_levels["pickup"]) + 1), "description": "星源碎片拾取範圍 +25"})
-	if int(meta_levels["armor"]) < 5 and _can_offer_passive("armor"):
-		result.append({"id": "armor", "name": "強化裝甲 Lv.%d" % (int(meta_levels["armor"]) + 1), "description": "護甲 +1，降低每次受到的傷害"})
-	if int(meta_levels["damage"]) < 5 and _can_offer_passive("damage"):
-		result.append({"id": "damage", "name": "星源增幅 Lv.%d" % (int(meta_levels["damage"]) + 1), "description": "所有武器傷害提高 12%"})
-	if int(meta_levels["cooldown"]) < 5 and _can_offer_passive("cooldown"):
-		result.append({"id": "cooldown", "name": "冷卻模組 Lv.%d" % (int(meta_levels["cooldown"]) + 1), "description": "所有自動武器冷卻縮短 6%"})
-	if int(meta_levels["area"]) < 5 and _can_offer_passive("area"):
-		result.append({"id": "area", "name": "廣域線圈 Lv.%d" % (int(meta_levels["area"]) + 1), "description": "能力與範圍武器擴大，投射物尺寸 +8%"})
-	if int(meta_levels["recovery"]) < 5 and _can_offer_passive("recovery"):
-		result.append({"id": "recovery", "name": "修復奈米機 Lv.%d" % (int(meta_levels["recovery"]) + 1), "description": "每秒回復 0.4 生命"})
-	if int(meta_levels["precision"]) < 5 and _can_offer_passive("precision"):
-		result.append({"id": "precision", "name": "精密核心 Lv.%d" % (int(meta_levels["precision"]) + 1), "description": "火球、星針與無人機光彈傷害提高 12%"})
+		if arsenal_level < 8 and _can_offer_common_weapon(arsenal_level):
+			result.append({"id": "arsenal:%s" % weapon_id, "name": "%s Lv.%d" % [ARSENAL_BLUEPRINTS[weapon_id]["name"], arsenal_level + 1], "description": _arsenal_upgrade_description(weapon_id, arsenal_level + 1)})
+	for passive_id in PASSIVE_BLUEPRINTS:
+		var passive_level := int(meta_levels[passive_id])
+		if passive_level < PASSIVE_MAX_LEVEL and _can_offer_passive(passive_id):
+			result.append({"id": passive_id, "name": "%s Lv.%d" % [PASSIVE_BLUEPRINTS[passive_id]["name"], passive_level + 1], "description": PASSIVE_BLUEPRINTS[passive_id]["description"]})
 	if result.is_empty():
-		result.append({"id": "fallback_heal", "name": "星源修復", "description": "回復 30 生命與 10 護盾"})
-		result.append({"id": "fallback_power", "name": "星源餘燼", "description": "所有傷害永久提高 3%"})
-		result.append({"id": "fallback_reroll", "name": "備用重骰", "description": "重骰次數 +1"})
+		result = [
+			{"id": "fallback_heal", "name": "星源修復", "description": "回復 30 生命與 10 護盾"},
+			{"id": "fallback_power", "name": "星源餘燼", "description": "所有傷害永久提高 3%"},
+			{"id": "fallback_reroll", "name": "備用重骰", "description": "重骰次數 +1"},
+		]
 	return result
 
 
@@ -2894,36 +2263,6 @@ func _needle_upgrade_description(next_level: int) -> String:
 		7: return "攻擊間隔再縮短 15%"
 		8: return "再增加 1 枚星針，傷害 +10"
 	return "強化星針"
-
-
-func _storm_upgrade_description(next_level: int) -> String:
-	match next_level:
-		1: return "取得武器：定期轟擊最近的異變體"
-		2: return "雷暴傷害 +16"
-		3: return "額外轟擊 1 個目標"
-		4: return "攻擊間隔縮短 25%"
-		5: return "再增加 1 個目標，作用半徑 +24"
-	return "強化脈衝雷暴"
-
-
-func _drone_upgrade_description(next_level: int) -> String:
-	match next_level:
-		1: return "取得武器：無人機高速射擊最近異變體"
-		2: return "射擊傷害 +7"
-		3: return "每輪額外發射 1 枚光彈"
-		4: return "射擊間隔縮短 20%"
-		5: return "再增加 1 枚光彈，傷害 +7"
-	return "強化守望無人機"
-
-
-func _gravity_upgrade_description(next_level: int) -> String:
-	match next_level:
-		1: return "取得武器：在敵人腳下生成牽引奇點"
-		2: return "奇點傷害 +12"
-		3: return "牽引與傷害範圍 +22"
-		4: return "生成間隔縮短 22%"
-		5: return "牽引力提高，傷害 +16"
-	return "強化重力奇點"
 
 
 func _meteor_upgrade_description(next_level: int) -> String:
@@ -3025,30 +2364,21 @@ func _select_upgrade(upgrade_id: String) -> void:
 		arsenal_timers[weapon_id] = 0.05
 	else:
 		_apply_standard_upgrade(upgrade_id)
-
 	_try_consume_evolution_core()
-
 	pending_levels = maxi(0, pending_levels - 1)
-	if pending_levels > 0:
-		_show_upgrade_choices()
-	elif pending_elite_rewards > 0:
-		_show_elite_reward_choices()
-	else:
-		choosing_upgrade = false
-		upgrade_overlay.visible = false
-		get_tree().paused = false
+	_advance_choice_queue()
 
 
 func _apply_standard_upgrade(upgrade_id: String) -> void:
+	if meta_levels.has(upgrade_id):
+		meta_levels[upgrade_id] = int(meta_levels[upgrade_id]) + 1
 	match upgrade_id:
 		"scythe":
 			scythe_level += 1
 			if selected_character == "epathy":
-				match scythe_level:
-					3, 5, 7, 8: scythe_damage += 5.0
-					4, 6:
-						scythe_damage += 5.0
-						scythe_radius *= 1.1
+				scythe_damage += 5.0 if scythe_level >= 3 else 0.0
+				if scythe_level in [4, 6]:
+					scythe_radius *= 1.1
 			else:
 				match scythe_level:
 					2: scythe_damage += 10.0
@@ -3061,30 +2391,10 @@ func _apply_standard_upgrade(upgrade_id: String) -> void:
 		"needle":
 			needle_level += 1
 			match needle_level:
-				2: needle_damage += 8.0
+				2, 5: needle_damage += 8.0
 				4: needle_interval *= 0.8
-				5: needle_damage += 8.0
 				7: needle_interval *= 0.85
 				8: needle_damage += 10.0
-		"storm":
-			storm_level += 1
-			match storm_level:
-				2: storm_damage += 16.0
-				4: storm_interval *= 0.75
-				5: storm_radius += 24.0
-		"drone":
-			drone_level += 1
-			match drone_level:
-				2: drone_damage += 7.0
-				4: drone_interval *= 0.8
-				5: drone_damage += 7.0
-		"gravity":
-			gravity_level += 1
-			match gravity_level:
-				2: gravity_damage += 12.0
-				3: gravity_radius += 22.0
-				4: gravity_interval *= 0.78
-				5: gravity_damage += 16.0
 		"meteor":
 			meteor_level += 1
 			match meteor_level:
@@ -3095,45 +2405,22 @@ func _apply_standard_upgrade(upgrade_id: String) -> void:
 				7: meteor_interval *= 0.85
 				8: meteor_radius += 18.0
 		"health":
-			meta_levels["health"] = int(meta_levels["health"]) + 1
 			player_max_health += 15.0
 			player_health = minf(player_max_health, player_health + 15.0)
-		"speed":
-			meta_levels["speed"] = int(meta_levels["speed"]) + 1
-			player_speed *= 1.08
-		"pickup":
-			meta_levels["pickup"] = int(meta_levels["pickup"]) + 1
-			pickup_radius += 25.0
-		"armor":
-			meta_levels["armor"] = int(meta_levels["armor"]) + 1
-			player_armor += 1.0
-		"damage":
-			meta_levels["damage"] = int(meta_levels["damage"]) + 1
-			damage_multiplier *= 1.12
-		"cooldown":
-			meta_levels["cooldown"] = int(meta_levels["cooldown"]) + 1
-			scythe_interval *= 0.94
-			needle_interval *= 0.94
-			storm_interval *= 0.94
-			drone_interval *= 0.94
-			gravity_interval *= 0.94
-			meteor_interval *= 0.94
-			arsenal_cooldown_scale *= 0.94
+		"speed": player_speed *= 1.08
+		"pickup": pickup_radius += 25.0
+		"armor": player_armor += 1.0
+		"damage": damage_multiplier *= 1.12
+		"cooldown": cooldown_scale *= 0.94
 		"area":
-			meta_levels["area"] = int(meta_levels["area"]) + 1
 			scythe_radius += 12.0
-			storm_radius += 7.0
-			gravity_radius += 8.0
 			meteor_radius += 8.0
 			projectile_area_scale *= 1.08
 			arsenal_area_scale *= 1.08
 		"recovery":
-			meta_levels["recovery"] = int(meta_levels["recovery"]) + 1
 			recovery_per_second += 0.4
 			player_health = minf(player_max_health, player_health + 5.0)
-		"precision":
-			meta_levels["precision"] = int(meta_levels["precision"]) + 1
-			projectile_damage_multiplier *= 1.12
+		"precision": projectile_damage_multiplier *= 1.12
 		"fallback_heal":
 			player_health = minf(player_max_health, player_health + 30.0)
 			player_shield = minf(player_max_shield, player_shield + 10.0)
@@ -3269,7 +2556,7 @@ func _update_interface(delta: float) -> void:
 	if not active_arsenal.is_empty():
 		weapon_label.text += "\n" + "｜".join(active_arsenal)
 	var skill_name: String = _starter_evolution_name() if scythe_evolved else CHARACTERS[selected_character]["skill_name"]
-	skill_label.text = "自動能力｜%s\n每 %.1f 秒發動" % [skill_name, scythe_interval]
+	skill_label.text = "自動能力｜%s\n每 %.1f 秒發動" % [skill_name, scythe_interval * cooldown_scale]
 	skill_label.modulate = _starter_ring_color()
 	xp_bar.max_value = experience_required
 	xp_bar.value = experience
@@ -3323,6 +2610,7 @@ func _draw() -> void:
 	_draw_player_projectiles()
 	_draw_hostile_projectiles()
 	_draw_effect_layer(false)
+	_draw_map_object_indicator()
 
 
 func _draw_effect_layer(ground_layer: bool) -> void:
@@ -3406,9 +2694,6 @@ func _draw_player_projectiles() -> void:
 			draw_line(projectile["pos"] - direction * 18.0, projectile["pos"], Color(fireball_color, 0.48), 8.0, true)
 			draw_circle(projectile["pos"], float(projectile["radius"]), fireball_color)
 			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.46, fireball_color.lightened(0.55))
-		elif projectile.get("kind", "") == "drone_bolt":
-			draw_line(projectile["pos"] - direction * 15.0, projectile["pos"] + direction * 5.0, Color(1.0, 0.83, 0.26), 5.0, true)
-			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.72, Color(1.0, 0.97, 0.72))
 		elif projectile.get("kind", "") == "arsenal":
 			var arsenal_color: Color = projectile.get("color", Color(0.35, 0.82, 1.0))
 			match projectile.get("weapon_id", ""):
@@ -3439,106 +2724,25 @@ func _draw_hostile_projectiles() -> void:
 			draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, 0.0, TAU, 18, hostile_color.lightened(0.42), 2.0, true)
 
 
-func _draw_legacy() -> void:
-	_draw_background()
-
-	for gem in gems:
-		var position: Vector2 = gem["pos"]
-		if not _is_world_visible(position, 24.0):
-			continue
-		var size := 7.0 if float(gem["value"]) <= 1.0 else 11.0
-		var points := PackedVector2Array([
-			position + Vector2(0.0, -size),
-			position + Vector2(size * 0.72, 0.0),
-			position + Vector2(0.0, size),
-			position + Vector2(-size * 0.72, 0.0),
-		])
-		draw_colored_polygon(points, Color(0.26, 0.95, 1.0))
-
-	for core in repair_cores:
-		var core_pos: Vector2 = core["pos"]
-		if not _is_world_visible(core_pos, 32.0):
-			continue
-		draw_circle(core_pos, 13.0, Color(0.14, 0.95, 0.62, 0.22))
-		draw_arc(core_pos, 12.0, 0.0, TAU, 24, Color(0.35, 1.0, 0.72), 3.0, true)
-		draw_rect(Rect2(core_pos + Vector2(-3.0, -8.0), Vector2(6.0, 16.0)), Color(0.7, 1.0, 0.86))
-		draw_rect(Rect2(core_pos + Vector2(-8.0, -3.0), Vector2(16.0, 6.0)), Color(0.7, 1.0, 0.86))
-
-	for core in evolution_cores:
-		var core_pos: Vector2 = core["pos"]
-		if not _is_world_visible(core_pos, 36.0):
-			continue
-		var pulse := 1.0 + sin(game_time * 5.5) * 0.12
-		var outer_points := PackedVector2Array()
-		for point_index in 6:
-			outer_points.append(core_pos + Vector2.from_angle(TAU * float(point_index) / 6.0) * 16.0 * pulse)
-		draw_colored_polygon(outer_points, Color(1.0, 0.72, 0.18, 0.88))
-		draw_arc(core_pos, 21.0 * pulse, 0.0, TAU, 28, Color(0.45, 0.95, 1.0, 0.78), 4.0, true)
-		draw_circle(core_pos, 6.0, Color(0.96, 1.0, 0.78))
-
-	for chest in elite_chests:
-		var chest_pos: Vector2 = chest["pos"]
-		if not _is_world_visible(chest_pos, 42.0):
-			continue
-		var chest_pulse := 1.0 + sin(float(chest.get("pulse", 0.0))) * 0.08
-		draw_circle(chest_pos, 25.0 * chest_pulse, Color(1.0, 0.72, 0.16, 0.15))
-		draw_rect(Rect2(chest_pos + Vector2(-17.0, -10.0) * chest_pulse, Vector2(34.0, 24.0) * chest_pulse), Color(0.18, 0.12, 0.28), true)
-		draw_rect(Rect2(chest_pos + Vector2(-17.0, -10.0) * chest_pulse, Vector2(34.0, 24.0) * chest_pulse), Color(1.0, 0.72, 0.2), false, 4.0)
-		draw_line(chest_pos + Vector2(-17.0, -2.0), chest_pos + Vector2(17.0, -2.0), Color(1.0, 0.9, 0.45), 4.0, true)
-		draw_circle(chest_pos + Vector2(0.0, 4.0), 4.0, Color(0.48, 0.95, 1.0))
-
-	for projectile in projectiles:
-		if not _is_world_visible(projectile["pos"], 48.0):
-			continue
-		var direction: Vector2 = projectile["velocity"].normalized()
-		if projectile.get("kind", "") == "fireball":
-			var fireball_color: Color = projectile.get("color", Color(1.0, 0.42, 0.16))
-			draw_line(projectile["pos"] - direction * 18.0, projectile["pos"], Color(fireball_color, 0.48), 8.0, true)
-			draw_circle(projectile["pos"], float(projectile["radius"]), fireball_color)
-			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.46, fireball_color.lightened(0.55))
-		elif projectile.get("kind", "") == "drone_bolt":
-			draw_line(projectile["pos"] - direction * 15.0, projectile["pos"] + direction * 5.0, Color(1.0, 0.83, 0.26), 5.0, true)
-			draw_circle(projectile["pos"], float(projectile["radius"]) * 0.72, Color(1.0, 0.97, 0.72))
-		elif projectile.get("kind", "") == "arsenal":
-			var arsenal_color: Color = projectile.get("color", Color(0.35, 0.82, 1.0))
-			match projectile.get("weapon_id", ""):
-				"ion_axe":
-					var side := direction.rotated(PI * 0.5) * float(projectile["radius"])
-					draw_colored_polygon(PackedVector2Array([projectile["pos"] + direction * 15.0, projectile["pos"] + side, projectile["pos"] - direction * 15.0, projectile["pos"] - side]), arsenal_color)
-					draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, game_time * 7.0, game_time * 7.0 + 4.7, 16, Color(1.0, 0.82, 0.36, 0.8), 3.0, true)
-				"return_disc":
-					draw_arc(projectile["pos"], float(projectile["radius"]) + 5.0, game_time * 9.0, game_time * 9.0 + 5.2, 20, arsenal_color, 6.0, true)
-					draw_circle(projectile["pos"], 3.0, Color(1.0, 1.0, 0.78))
-				_:
-					draw_line(projectile["pos"] - direction * 14.0, projectile["pos"] + direction * 7.0, Color(arsenal_color, 0.42), maxf(4.0, float(projectile["radius"]) * 0.7), true)
-					draw_circle(projectile["pos"], float(projectile["radius"]), arsenal_color)
-		else:
-			var projectile_color := Color(0.95, 0.62, 1.0) if projectile.get("evolved", false) else Color(0.5, 0.95, 1.0)
-			draw_line(projectile["pos"] - direction * (14.0 if projectile.get("evolved", false) else 10.0), projectile["pos"] + direction * 7.0, projectile_color, 7.0 if projectile.get("evolved", false) else 5.0, true)
-
-	for projectile in hostile_projectiles:
-		if not _is_world_visible(projectile["pos"], 48.0):
-			continue
-		var hostile_color := Color(1.0, 0.48, 0.12) if projectile.get("kind", "") == "fan" else Color(1.0, 0.2, 0.48)
-		draw_circle(projectile["pos"], float(projectile["radius"]), hostile_color)
-		if enemies.size() < LOW_DETAIL_ENEMY_COUNT:
-			draw_arc(projectile["pos"], float(projectile["radius"]) + 4.0, 0.0, TAU, 18, hostile_color.lightened(0.42), 2.0, true)
-
-	for enemy in enemies:
-		if not _is_world_visible(enemy["pos"], DRAW_MARGIN + float(enemy["radius"])):
-			continue
-		_draw_enemy(enemy)
-
-	for effect in effects:
-		if not _is_world_visible(effect["pos"], float(effect.get("radius", 0.0)) + 48.0):
-			continue
-		_draw_effect(effect)
-
-	_draw_player()
+func _draw_map_object_indicator() -> void:
+	if not run_started or game_over:
+		return
+	var target := _nearest_map_object()
+	if target.is_empty() or _is_world_visible(target["pos"], -40.0):
+		return
+	var view_center := camera.get_screen_center_position()
+	var offset: Vector2 = Vector2(target["pos"]) - view_center
+	var edge := VIEW_SIZE * 0.5 - Vector2(60.0, 60.0)
+	var edge_scale := minf(edge.x / maxf(absf(offset.x), 0.001), edge.y / maxf(absf(offset.y), 0.001))
+	var direction := offset.normalized()
+	var tip := view_center + offset * minf(edge_scale, 1.0)
+	var side := direction.orthogonal() * 12.0
+	draw_colored_polygon(PackedVector2Array([tip + direction * 18.0, tip - direction * 10.0 + side, tip - direction * 10.0 - side]), Color(1.0, 0.78, 0.25, 0.92))
+	draw_string(ui_theme.default_font, tip - direction * 32.0 + Vector2(-40.0, 6.0), "補給 %dm" % int(offset.length() / 32.0), HORIZONTAL_ALIGNMENT_CENTER, 80.0, 15, Color(1.0, 0.9, 0.6))
 
 
 func _is_world_visible(world_position: Vector2, margin: float = DRAW_MARGIN) -> bool:
-	var view_center := camera.get_screen_center_position() if is_instance_valid(camera) else player_pos
+	var view_center: Vector2 = camera.get_screen_center_position() if is_instance_valid(camera) else player_pos
 	var offset := world_position - view_center
 	return absf(offset.x) <= VIEW_SIZE.x * 0.5 + margin and absf(offset.y) <= VIEW_SIZE.y * 0.5 + margin
 
@@ -3641,7 +2845,7 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		draw_ellipse_shadow(position + Vector2(0.0, 13.0), 82.0, 25.0, Color(0.01, 0.015, 0.02, 0.58))
 		draw_circle(position, radius + 12.0, Color(boss_color, 0.14))
 		draw_arc(position, radius + 16.0, game_time * 0.5, game_time * 0.5 + TAU * 0.78, 48, boss_color, 6.0, true)
-		_draw_sprite_billboard(anubarak_texture, position + Vector2(0.0, 20.0), 178.0, Color(1.7, 1.7, 1.7, 1.0) if flash else Color.WHITE)
+		_draw_sprite_billboard(ANUBARAK_TEXTURE, position + Vector2(0.0, 20.0), 178.0, Color(1.7, 1.7, 1.7, 1.0) if flash else Color.WHITE)
 		var burst_charge: float = float(enemy.get("burst_charge", 0.0))
 		if burst_charge > 0.0:
 			var charge_progress := clampf(1.0 - burst_charge / 0.85, 0.0, 1.0)
@@ -3692,23 +2896,16 @@ func _draw_enemy(enemy: Dictionary) -> void:
 			draw_arc(position, radius + 15.0, 0.0, TAU, 36, Color(0.42, 0.82, 1.0, 0.9), 5.0, true)
 		return
 
-	var base_color := Color(0.82, 0.2, 0.38)
-	match enemy["kind"]:
-		"dasher": base_color = Color(1.0, 0.52, 0.2)
-		"shooter": base_color = Color(0.72, 0.34, 1.0)
-		"tank": base_color = Color(0.9, 0.26, 0.22)
-		"guardian": base_color = Color(0.22, 0.72, 1.0)
-		"splitter": base_color = Color(1.0, 0.32, 0.68)
-		"contaminant": base_color = Color(0.35, 0.9, 0.38)
-	if low_detail and float(enemy.get("burn_time", 0.0)) > 0.0:
-		base_color = base_color.lerp(Color(1.0, 0.48, 0.08), 0.48)
-	elif low_detail and float(enemy.get("slow_time", 0.0)) > 0.0:
-		base_color = base_color.lerp(Color(0.35, 0.72, 1.0), 0.52)
+	var tint := Color.WHITE
 	if flash:
-		base_color = Color.WHITE
-	var enemy_texture: Texture2D = enemy_textures.get(enemy["kind"], enemy_textures.get("chaser"))
+		tint = Color(1.8, 1.8, 1.8)
+	elif float(enemy.get("burn_time", 0.0)) > 0.0:
+		tint = Color(1.35, 0.78, 0.55)
+	elif float(enemy.get("slow_time", 0.0)) > 0.0:
+		tint = Color(0.7, 0.9, 1.35)
+	var enemy_texture: Texture2D = ENEMY_TEXTURES.get(enemy["kind"], ENEMY_TEXTURES["chaser"])
 	draw_ellipse_shadow(position + Vector2(0.0, radius * 0.42), radius * 1.45, radius * 0.48, Color(0.01, 0.025, 0.025, 0.42))
-	_draw_sprite_billboard(enemy_texture, position + Vector2(0.0, radius * 0.55), radius * 3.3, Color(1.8, 1.8, 1.8, 1.0) if flash else Color.WHITE)
+	_draw_sprite_billboard(enemy_texture, position + Vector2(0.0, radius * 0.55), radius * 3.3, tint)
 	match enemy["kind"]:
 		"dasher":
 			if float(enemy.get("dash_charge", 0.0)) > 0.0:
@@ -3745,23 +2942,12 @@ func _draw_enemy(enemy: Dictionary) -> void:
 		draw_rect(Rect2(position + Vector2(-radius, -radius - 11.0), Vector2(radius * 2.0 * hp_ratio, 4.0)), Color(1.0, 0.75, 0.22))
 	if float(enemy.get("guarded_time", 0.0)) > 0.0:
 		draw_arc(position, radius + 7.0, 0.0, TAU, 28, Color(0.3, 0.82, 1.0, 0.82), 3.0, true)
-	if float(enemy.get("burn_time", 0.0)) > 0.0 and not low_detail:
-		draw_arc(position, radius + 8.0, -1.2, 2.2, 18, Color(1.0, 0.38, 0.08, 0.9), 4.0, true)
-	if float(enemy.get("slow_time", 0.0)) > 0.0 and not low_detail:
-		draw_arc(position, radius + 10.0, 0.0, TAU, 24, Color(0.42, 0.82, 1.0, 0.9), 4.0, true)
 
 
 func _draw_effect(effect: Dictionary) -> void:
 	var progress := 1.0 - float(effect["life"]) / float(effect["total"])
 	var alpha := 1.0 - progress
 	match effect["kind"]:
-		"ring":
-			var radius := lerpf(32.0, float(effect["radius"]), progress)
-			var ring_color: Color = effect.get("color", Color(0.25, 0.9, 1.0))
-			draw_arc(effect["pos"], radius, 0.0, TAU, 64, Color(ring_color, alpha), 8.0, true)
-			draw_arc(effect["pos"], radius * 0.82, -0.4, 3.8, 48, Color(ring_color.lightened(0.45), alpha * 0.85), 4.0, true)
-			if scythe_evolved:
-				draw_arc(effect["pos"], radius * 0.66, 0.8, 5.7, 52, Color(0.95, 0.78, 1.0, alpha), 6.0, true)
 		"burst":
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(1.0, 0.32, 0.48, alpha * 0.6))
 		"hurt":
@@ -3783,10 +2969,6 @@ func _draw_effect(effect: Dictionary) -> void:
 			var critical_radius := float(effect["radius"]) * (0.4 + progress * 0.75)
 			draw_arc(effect["pos"], critical_radius, -0.8, 2.3, 22, Color(1.0, 0.88, 0.42, alpha), 7.0, true)
 			draw_arc(effect["pos"], critical_radius * 0.72, 2.4, 5.5, 20, Color(critical_color, alpha), 5.0, true)
-		"fire":
-			var fire_color: Color = effect.get("color", Color(1.0, 0.5, 0.14))
-			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(fire_color, alpha * 0.16))
-			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 64, Color(fire_color.lightened(0.22), alpha), 7.0, true)
 		"pulse":
 			var pulse_color: Color = effect.get("color", Color(0.35, 0.9, 1.0))
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.25 + 0.75 * progress), 0.0, TAU, 64, Color(pulse_color, alpha), 11.0, true)
@@ -3794,32 +2976,15 @@ func _draw_effect(effect: Dictionary) -> void:
 			var ice_color: Color = effect.get("color", Color(0.55, 0.85, 1.0))
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(ice_color, alpha * 0.14))
 			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 64, Color(ice_color.lightened(0.25), alpha), 8.0, true)
-		"map_repair":
-			var repair_radius := float(effect["radius"]) * (0.28 + progress * 0.72)
-			draw_circle(effect["pos"], repair_radius, Color(0.24, 1.0, 0.68, alpha * 0.12))
-			draw_arc(effect["pos"], repair_radius, 0.0, TAU, 48, Color(0.52, 1.0, 0.78, alpha), 8.0, true)
 		"map_supply":
 			var supply_radius := float(effect["radius"]) * (0.28 + progress * 0.72)
 			draw_arc(effect["pos"], supply_radius, -progress * TAU, (1.0 - progress) * TAU, 48, Color(1.0, 0.76, 0.24, alpha), 8.0, true)
 			for shard_index in 6:
 				var shard_direction := Vector2.from_angle(TAU * float(shard_index) / 6.0)
 				draw_circle(effect["pos"] + shard_direction * supply_radius * 0.7, 6.0 * alpha, Color(1.0, 0.92, 0.48, alpha))
-		"map_pylon":
-			var pylon_radius := float(effect["radius"]) * progress
-			draw_circle(effect["pos"], pylon_radius, Color(1.0, 0.18, 0.48, alpha * 0.1))
-			draw_arc(effect["pos"], pylon_radius, 0.0, TAU, 72, Color(1.0, 0.36, 0.62, alpha), 12.0, true)
 		"repair":
 			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(0.2, 1.0, 0.62, alpha * 0.18))
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.45 + progress * 0.55), 0.0, TAU, 40, Color(0.48, 1.0, 0.76, alpha), 6.0, true)
-		"storm":
-			var strike_top: Vector2 = effect["pos"] + Vector2(0.0, -220.0)
-			draw_line(strike_top, effect["pos"], Color(0.72, 0.92, 1.0, alpha), 9.0, true)
-			draw_arc(effect["pos"], float(effect["radius"]) * (0.55 + progress * 0.45), 0.0, TAU, 36, Color(0.35, 0.78, 1.0, alpha), 7.0, true)
-		"gravity":
-			var gravity_radius_now := float(effect["radius"]) * (0.35 + progress * 0.65)
-			draw_circle(effect["pos"], gravity_radius_now, Color(0.45, 0.18, 0.78, alpha * 0.12))
-			draw_arc(effect["pos"], gravity_radius_now, progress * 2.0, TAU + progress * 2.0, 52, Color(0.72, 0.38, 1.0, alpha), 8.0, true)
-			draw_circle(effect["pos"], maxf(4.0, 16.0 * (1.0 - progress)), Color(0.06, 0.01, 0.12, alpha))
 		"meteor":
 			var meteor_radius_now := float(effect["radius"]) * progress
 			draw_line(effect["pos"] + Vector2(90.0, -210.0) * (1.0 - progress), effect["pos"], Color(1.0, 0.55, 0.15, alpha), 12.0, true)
@@ -3853,16 +3018,6 @@ func _draw_effect(effect: Dictionary) -> void:
 				draw_line(chain_start, chain_end, Color(0.42, 1.0, 0.72, alpha * 0.42), 10.0, true)
 				draw_line(chain_start, chain_end, Color(0.82, 1.0, 0.94, alpha), 3.0, true)
 				draw_circle(chain_end, 8.0 + progress * 5.0, Color(0.5, 1.0, 0.78, alpha))
-		"arsenal_screen":
-			draw_circle(effect["pos"], float(effect["radius"]) * progress, Color(1.0, 0.96, 0.78, alpha * 0.22))
-			draw_arc(effect["pos"], float(effect["radius"]) * progress, 0.0, TAU, 72, Color(1.0, 0.72, 0.22, alpha), 12.0, true)
-		"arsenal_freeze":
-			var freeze_angle := float(effect.get("angle", 0.0))
-			var freeze_radius := float(effect["radius"]) * progress
-			draw_colored_polygon(PackedVector2Array([effect["pos"], effect["pos"] + Vector2.from_angle(freeze_angle - 0.62) * freeze_radius, effect["pos"] + Vector2.from_angle(freeze_angle + 0.62) * freeze_radius]), Color(0.38, 0.78, 1.0, alpha * 0.18))
-		"arsenal_shield":
-			draw_circle(effect["pos"], float(effect["radius"]), Color(0.38, 0.78, 1.0, alpha * 0.08))
-			draw_arc(effect["pos"], float(effect["radius"]) * (0.8 + progress * 0.2), 0.0, TAU, 48, Color(0.55, 0.9, 1.0, alpha), 6.0, true)
 		"shield_break":
 			draw_arc(effect["pos"], float(effect["radius"]) * (0.75 + progress * 0.45), 0.0, TAU, 30, Color(0.35, 0.88, 1.0, alpha), 6.0, true)
 		"elite_chest":
@@ -3893,7 +3048,7 @@ func _draw_player() -> void:
 		var aura_pulse := 1.0 + sin(game_time * 5.0) * 0.1
 		draw_circle(player_pos + Vector2(0.0, -26.0), 47.0 * aura_pulse, Color(0.25, 1.0, 0.72, 0.09))
 		draw_arc(player_pos + Vector2(0.0, -20.0), 42.0 * aura_pulse, game_time, game_time + 5.1, 40, Color(0.48, 1.0, 0.82, 0.72), 4.0, true)
-	_draw_sprite_billboard(epathy_texture, player_pos + Vector2(0.0, 11.0), 94.0, sprite_modulate)
+	_draw_sprite_billboard(EPATHY_TEXTURE, player_pos + Vector2(0.0, 11.0), 94.0, sprite_modulate)
 	draw_arc(player_pos, 28.0, -0.9, 3.9, 30, Color(0.4, 1.0, 0.78, 0.68), 4.0, true)
 	if player_shield > 0.0:
 		var shield_alpha := 0.22 + 0.38 * (player_shield / player_max_shield)
@@ -3901,11 +3056,6 @@ func _draw_player() -> void:
 	var health_ratio := clampf(player_health / maxf(1.0, player_max_health), 0.0, 1.0)
 	draw_rect(Rect2(player_pos + Vector2(-30.0, 25.0), Vector2(60.0, 7.0)), Color(0.025, 0.04, 0.035, 0.88))
 	draw_rect(Rect2(player_pos + Vector2(-29.0, 26.0), Vector2(58.0 * health_ratio, 5.0)), Color(0.25, 0.92, 0.55))
-	if drone_level > 0:
-		var drone_pos := player_pos + Vector2.from_angle(game_time * 2.2) * 42.0
-		draw_line(player_pos, drone_pos, Color(1.0, 0.78, 0.2, 0.2), 2.0, true)
-		draw_circle(drone_pos, 8.0, Color(1.0, 0.76, 0.22))
-		draw_circle(drone_pos, 3.0, Color(1.0, 1.0, 0.78))
 	if scythe_timer < 0.22:
 		var preview_color := Color(_starter_ring_color(), 0.18)
 		match selected_character:
